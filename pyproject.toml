@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skimcode"
+version = "0.1.0"
+description = "AST-aware token optimizer for AI coding agents. 80-97% fewer tokens on file reads."
+requires-python = ">=3.10"
+license = {text = "MIT"}
+keywords = ["ai", "token", "optimizer", "cli", "tree-sitter", "claude-code", "cursor", "coding-agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "tree-sitter>=0.23.0",
+    "tree-sitter-python",
+    "tree-sitter-javascript",
+    "tree-sitter-typescript",
+    "tomli>=1.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+all = [
+    "tree-sitter-rust",
+    "tree-sitter-go",
+    "tree-sitter-java",
+    "tree-sitter-ruby",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+]
+
+[project.scripts]
+skim = "skim.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/skim-ai/skim"
+Repository = "https://github.com/skim-ai/skim"
+Issues = "https://github.com/skim-ai/skim/issues"
+
+[tool.setuptools]
+packages = ["skim", "skim.hooks", "skim.filters"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+skim = ["skill.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
