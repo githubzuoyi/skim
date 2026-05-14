@@ -75,6 +75,98 @@ LANGUAGES: dict[str, LanguageConfig] = {
             "lexical_declaration", "type_alias_declaration",
         }),
     ),
+    ".jsx": LanguageConfig(
+        ts_module="tree_sitter_javascript",
+        function_types=frozenset({"function_declaration", "method_definition"}),
+        class_types=frozenset({"class_declaration"}),
+        import_types=frozenset({"import_statement"}),
+        export_patterns=frozenset({"export_statement"}),
+        extra_symbol_types=frozenset({"lexical_declaration"}),
+    ),
+    # --- Optional languages (require extras: pip install skimcode[all]) ---
+    ".rs": LanguageConfig(
+        ts_module="tree_sitter_rust",
+        function_types=frozenset({"function_item"}),
+        class_types=frozenset({"struct_item", "enum_item", "impl_item", "trait_item"}),
+        import_types=frozenset({"use_declaration"}),
+        name_field="name",
+        body_field="body",
+        extra_symbol_types=frozenset({"const_item", "static_item", "type_item"}),
+    ),
+    ".go": LanguageConfig(
+        ts_module="tree_sitter_go",
+        function_types=frozenset({"function_declaration", "method_declaration"}),
+        class_types=frozenset({"type_declaration"}),
+        import_types=frozenset({"import_declaration"}),
+        name_field="name",
+        body_field="body",
+    ),
+    ".java": LanguageConfig(
+        ts_module="tree_sitter_java",
+        function_types=frozenset({"method_declaration", "constructor_declaration"}),
+        class_types=frozenset({"class_declaration", "interface_declaration", "enum_declaration"}),
+        import_types=frozenset({"import_declaration"}),
+        name_field="name",
+        body_field="body",
+        decorator_types=frozenset({"marker_annotation", "annotation"}),
+    ),
+    ".rb": LanguageConfig(
+        ts_module="tree_sitter_ruby",
+        function_types=frozenset({"method", "singleton_method"}),
+        class_types=frozenset({"class", "module"}),
+        import_types=frozenset(),
+        name_field="name",
+        body_field="body",
+    ),
+    ".c": LanguageConfig(
+        ts_module="tree_sitter_c",
+        function_types=frozenset({"function_definition"}),
+        class_types=frozenset({"struct_specifier"}),
+        import_types=frozenset({"preproc_include"}),
+        name_field="declarator",
+        body_field="body",
+    ),
+    ".cpp": LanguageConfig(
+        ts_module="tree_sitter_cpp",
+        function_types=frozenset({"function_definition"}),
+        class_types=frozenset({"class_specifier", "struct_specifier"}),
+        import_types=frozenset({"preproc_include"}),
+        name_field="declarator",
+        body_field="body",
+    ),
+    ".h": LanguageConfig(
+        ts_module="tree_sitter_c",
+        function_types=frozenset({"function_definition"}),
+        class_types=frozenset({"struct_specifier"}),
+        import_types=frozenset({"preproc_include"}),
+        name_field="declarator",
+        body_field="body",
+    ),
+    ".hpp": LanguageConfig(
+        ts_module="tree_sitter_cpp",
+        function_types=frozenset({"function_definition"}),
+        class_types=frozenset({"class_specifier", "struct_specifier"}),
+        import_types=frozenset({"preproc_include"}),
+        name_field="declarator",
+        body_field="body",
+    ),
+    ".swift": LanguageConfig(
+        ts_module="tree_sitter_swift",
+        function_types=frozenset({"function_declaration", "init_declaration"}),
+        class_types=frozenset({"class_declaration", "protocol_declaration", "struct_declaration"}),
+        import_types=frozenset({"import_declaration"}),
+        name_field="name",
+        body_field="body",
+    ),
+    ".kt": LanguageConfig(
+        ts_module="tree_sitter_kotlin",
+        function_types=frozenset({"function_declaration"}),
+        class_types=frozenset({"class_declaration", "object_declaration"}),
+        import_types=frozenset({"import_header"}),
+        name_field="name",
+        body_field="body",
+        decorator_types=frozenset({"annotation"}),
+    ),
 }
 
 
@@ -501,48 +593,82 @@ def _format_structural_summary(
     imports: list[str],
 ) -> str:
     """Format the structural summary as compact, readable output."""
+    import sys
+
+    tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
     parts: list[str] = []
 
-    # Header
+    total_symbols = sum(1 + len(s.children) for s in symbols)
     export_count = sum(1 for s in symbols if s.is_exported)
-    header = f"// {path}  {len(lines)} lines"
-    if export_count:
-        header += f"  {export_count} exports"
-    header += f"  {sum(1 + len(s.children) for s in symbols)} symbols"
-    parts.append(header)
 
-    # Imports (compact)
-    if imports:
-        compact_imports = _compact_imports(imports)
-        parts.append(f"// imports: {compact_imports}")
+    if tty:
+        from skim.style import BOLD, DIM, RESET, CYAN, YELLOW, GREEN, WHITE
+
+        # Header with colors
+        header = f"{DIM}//{RESET} {BOLD}{CYAN}{path}{RESET}"
+        header += f"  {DIM}{len(lines)} lines{RESET}"
+        if export_count:
+            header += f"  {YELLOW}{export_count} exports{RESET}"
+        header += f"  {GREEN}{total_symbols} symbols{RESET}"
+        parts.append(header)
+
+        if imports:
+            compact_imports = _compact_imports(imports)
+            parts.append(f"{DIM}// imports: {compact_imports}{RESET}")
+    else:
+        header = f"// {path}  {len(lines)} lines"
+        if export_count:
+            header += f"  {export_count} exports"
+        header += f"  {total_symbols} symbols"
+        parts.append(header)
+
+        if imports:
+            compact_imports = _compact_imports(imports)
+            parts.append(f"// imports: {compact_imports}")
 
     parts.append("")
 
-    # Symbols
     for sym in symbols:
         prefix = ""
         for dec in sym.decorators:
-            parts.append(dec)
+            parts.append(f"{DIM}{dec}{RESET}" if tty else dec)
         if sym.is_exported:
             prefix = "export "
 
         if sym.kind in ("class", "interface"):
-            parts.append(f"{prefix}{sym.signature}")
-            for method in sym.children:
-                method_prefix = "  "
-                parts.append(f"{method_prefix}{method.signature}")
-            if sym.children:
-                line_span = sym.end_line - sym.start_line + 1
-                parts.append(f"  // ... {line_span} lines total")
-        elif sym.kind == "type":
-            parts.append(f"{prefix}{sym.signature}")
+            if tty:
+                parts.append(f"{BOLD}{WHITE}{prefix}{sym.signature}{RESET}")
+                for method in sym.children:
+                    parts.append(f"  {CYAN}{method.signature}{RESET}")
+                if sym.children:
+                    line_span = sym.end_line - sym.start_line + 1
+                    parts.append(f"  {DIM}// ... {line_span} lines total{RESET}")
+            else:
+                parts.append(f"{prefix}{sym.signature}")
+                for method in sym.children:
+                    parts.append(f"  {method.signature}")
+                if sym.children:
+                    line_span = sym.end_line - sym.start_line + 1
+                    parts.append(f"  // ... {line_span} lines total")
         else:
-            parts.append(f"{prefix}{sym.signature}")
+            if tty:
+                parts.append(f"{WHITE}{prefix}{sym.signature}{RESET}")
+            else:
+                parts.append(f"{prefix}{sym.signature}")
 
     # Footer
+    summary_lines = len(parts) + 2
+    pct = _savings_pct(len(lines), summary_lines)
     parts.append("")
-    parts.append(f"// [{len(lines)} lines -> {len(parts)} lines ({_savings_pct(len(lines), len(parts))} reduction)]")
-    parts.append(f"// [skim read {path}:<symbol> for full function]")
+    if tty:
+        parts.append(
+            f"{DIM}// [{len(lines)} lines → {summary_lines} lines "
+            f"({GREEN}{pct} reduction{DIM})]{RESET}"
+        )
+        parts.append(f"{DIM}// [skim read {path}:<symbol> for full function]{RESET}")
+    else:
+        parts.append(f"// [{len(lines)} lines -> {summary_lines} lines ({pct} reduction)]")
+        parts.append(f"// [skim read {path}:<symbol> for full function]")
 
     return "\n".join(parts)
 

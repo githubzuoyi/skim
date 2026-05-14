@@ -90,6 +90,10 @@ class SessionManager:
                 current_tokens = estimate_tokens(current_content)
                 unchanged_msg = f"[unchanged since {_fmt_relative_time(now - entry.first_seen)}]"
                 saved = current_tokens - estimate_tokens(unchanged_msg)
+                if saved <= 0:
+                    # Content is smaller than the unchanged marker — not worth deduplicating
+                    self._save()
+                    return current_content, 0
                 entry.saved_tokens += saved
                 self._save()
                 return unchanged_msg, saved

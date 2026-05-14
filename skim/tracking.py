@@ -143,31 +143,54 @@ class Tracker:
         }
 
     def print_summary(self, summary: dict[str, Any]) -> None:
-        """Print a formatted gain summary to stdout."""
-        print(f"skim - Token Savings (last {summary['days']} days)")
+        """Print a beautifully formatted gain summary."""
+        from skim.style import (
+            BOLD, DIM, RESET, CYAN, GREEN, BRIGHT_GREEN, YELLOW, WHITE,
+            BRIGHT_CYAN, hline, fmt_savings, SAVED,
+        )
+
+        print()
+        print(f"  {BOLD}{BRIGHT_CYAN}skim{RESET}  {DIM}Token Savings (last {summary['days']} days){RESET}")
         print()
 
-        header = f"  {'Mode':<22} {'Operations':>10}   {'Tokens Saved':>14}    {'Savings':>7}"
-        print(header)
+        # Table header
+        print(
+            f"  {DIM}{'Mode':<22} {'Operations':>10}   {'Tokens Saved':>14}    {'Savings':>7}{RESET}"
+        )
+        print(f"  {hline(62)}")
 
+        # Rows
         for m in summary["modes"]:
             label = _mode_label(m["mode"])
+            icon = _mode_icon(m["mode"])
+            pct = m["savings_pct"]
             print(
-                f"  {label:<22} {m['operations']:>10,}   "
-                f"{m['tokens_saved']:>14,}    -{m['savings_pct']}%"
+                f"  {icon} {WHITE}{label:<20}{RESET} {m['operations']:>10,}   "
+                f"{YELLOW}{m['tokens_saved']:>14,}{RESET}    {fmt_savings(pct)}"
             )
 
-        print(f"  {'─' * 62}")
+        # Total
+        print(f"  {hline(62)}")
+        total_pct = summary["total_savings_pct"]
         print(
-            f"  {'TOTAL':<22} {summary['total_operations']:>10,}   "
-            f"{summary['total_tokens_saved']:>14,}    -{summary['total_savings_pct']}%"
+            f"  {SAVED} {BOLD}{'TOTAL':<20}{RESET} {BOLD}{summary['total_operations']:>10,}{RESET}   "
+            f"{BOLD}{YELLOW}{summary['total_tokens_saved']:>14,}{RESET}    "
+            f"{BOLD}{fmt_savings(total_pct)}{RESET}"
         )
+
         if summary["est_cost_saved_monthly"] > 0:
-            print(f"  Est. cost saved{' ' * 20}${summary['est_cost_saved_monthly']:.2f}/month")
+            cost = summary["est_cost_saved_monthly"]
+            print(
+                f"  {DIM}  Est. cost saved{RESET}"
+                f"{'':>21}{BRIGHT_GREEN}${cost:.2f}/month{RESET}"
+            )
+
         print()
 
     def print_history(self, limit: int = 50) -> None:
         """Print recent command history."""
+        from skim.style import BOLD, DIM, RESET, CYAN, YELLOW, GREEN, WHITE, hline
+
         rows = self._conn.execute(
             """SELECT timestamp, command, input_tokens, saved_tokens, mode
                FROM commands ORDER BY timestamp DESC LIMIT ?""",
@@ -175,17 +198,28 @@ class Tracker:
         ).fetchall()
 
         if not rows:
-            print("No history recorded yet.")
+            print(f"  {DIM}No history recorded yet.{RESET}")
             return
 
-        print(f"  {'Time':<10} {'Command':<30} {'Input':>8} {'Saved':>8} {'Mode':<12}")
+        print()
+        print(
+            f"  {DIM}{'Time':<10} {'Command':<30} {'Input':>8} {'Saved':>8} {'Mode':<12}{RESET}"
+        )
+        print(f"  {hline(72)}")
         for ts, cmd, inp, saved, mode in reversed(rows):
             t = time.strftime("%H:%M:%S", time.localtime(ts))
             cmd_short = cmd[:28] + ".." if len(cmd) > 30 else cmd
-            print(f"  {t:<10} {cmd_short:<30} {inp:>8,} {saved:>8,} {mode or '':<12}")
+            saved_color = GREEN if saved > 0 else DIM
+            print(
+                f"  {DIM}{t}{RESET}  {WHITE}{cmd_short:<30}{RESET}"
+                f"{inp:>8,} {saved_color}{saved:>8,}{RESET} {DIM}{mode or '':<12}{RESET}"
+            )
+        print()
 
     def print_daily(self, days: int = 30) -> None:
         """Print day-by-day breakdown."""
+        from skim.style import BOLD, DIM, RESET, YELLOW, WHITE, GREEN, hline
+
         cutoff = time.time() - (days * 86400)
         rows = self._conn.execute(
             """SELECT date(timestamp, 'unixepoch', 'localtime') as day,
@@ -198,12 +232,19 @@ class Tracker:
         ).fetchall()
 
         if not rows:
-            print("No data for this period.")
+            print(f"  {DIM}No data for this period.{RESET}")
             return
 
-        print(f"  {'Date':<14} {'Operations':>10} {'Tokens Saved':>14}")
+        print()
+        print(f"  {DIM}{'Date':<14} {'Operations':>10} {'Tokens Saved':>14}{RESET}")
+        print(f"  {hline(42)}")
         for day, ops, saved in rows:
-            print(f"  {day:<14} {ops:>10,} {saved:>14,}")
+            bar_len = min(int(saved / max(1, max(r[2] for r in rows)) * 20), 20)
+            bar = f"{GREEN}{'█' * bar_len}{DIM}{'░' * (20 - bar_len)}{RESET}"
+            print(
+                f"  {WHITE}{day}{RESET}  {ops:>10,} {YELLOW}{saved:>14,}{RESET}  {bar}"
+            )
+        print()
 
     def reset(self) -> None:
         """Delete all tracking data."""
@@ -246,3 +287,17 @@ def _mode_label(mode: str) -> str:
         "symbol": "Symbol extract",
     }
     return labels.get(mode, mode)
+
+
+def _mode_icon(mode: str) -> str:
+    from skim.style import CYAN, GREEN, YELLOW, MAGENTA, BLUE, DIM, RESET
+
+    icons = {
+        "structural": f"{CYAN}◆{RESET}",
+        "dedup": f"{GREEN}◆{RESET}",
+        "compress": f"{YELLOW}◆{RESET}",
+        "full": f"{DIM}◇{RESET}",
+        "head_tail": f"{BLUE}◆{RESET}",
+        "symbol": f"{MAGENTA}◆{RESET}",
+    }
+    return icons.get(mode, f"{DIM}◇{RESET}")

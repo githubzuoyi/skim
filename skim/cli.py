@@ -76,8 +76,9 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.version:
         from skim import __version__
+        from skim.style import BOLD, CYAN, DIM, RESET
 
-        print(f"skim {__version__}")
+        print(f"{BOLD}{CYAN}skim{RESET} {DIM}v{__version__}{RESET}  {DIM}AST-aware token optimizer{RESET}")
         return
 
     if args.command is None:

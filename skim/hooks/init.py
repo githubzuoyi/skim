@@ -16,6 +16,7 @@ from skim.hooks.constants import (
     CLAUDE_MD_PATCH,
     CURSOR_HOOK_CONFIG,
     SKILL_CONTENT,
+    _CURSOR_RULE_CONTENT,
 )
 
 
@@ -39,9 +40,15 @@ def cmd_init(args) -> None:
         init_claude_global()
     elif agent == "cursor":
         init_cursor()
+    elif agent == "codex":
+        init_codex()
+    elif agent == "copilot":
+        init_copilot()
+    elif agent in ("gemini", "windsurf", "cline"):
+        init_shell_alias(agent)
     else:
         print(f"skim: agent '{agent}' hook installation not yet supported", file=sys.stderr)
-        print("Supported agents: claude, cursor", file=sys.stderr)
+        print("Supported agents: claude, cursor, codex, copilot, gemini, windsurf, cline", file=sys.stderr)
         sys.exit(1)
 
 
@@ -73,17 +80,17 @@ def init_claude_global() -> None:
     pre_tool.append(CLAUDE_HOOK)
 
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
-    print(f"  ✓ Installed Claude Code hook → {settings_path}")
 
-    # Write SKIM.md
+    from skim.style import CHECK, BOLD, DIM, RESET, CYAN, GREEN
+
+    print(f"  {CHECK} Installed Claude Code hook {DIM}→{RESET} {settings_path}")
+
     _write_skill_file()
-
-    # Patch CLAUDE.md to reference SKIM.md
     _patch_claude_md()
 
     print()
-    print("  Done! Restart Claude Code to activate.")
-    print("  Run `skim gain` anytime to see token savings.")
+    print(f"  {GREEN}Done!{RESET} Restart Claude Code to activate.")
+    print(f"  Run {BOLD}skim gain{RESET} anytime to see token savings.")
 
 
 def _uninstall_claude() -> None:
@@ -138,13 +145,17 @@ def init_cursor() -> None:
     pre_tool.append(CURSOR_HOOK_CONFIG["hooks"]["preToolUse"][0])
 
     hooks_path.write_text(json.dumps(existing, indent=2) + "\n")
-    print(f"  ✓ Installed Cursor hook → {hooks_path}")
+
+    from skim.style import CHECK, BOLD, DIM, RESET, GREEN
+
+    print(f"  {CHECK} Installed Cursor hook {DIM}→{RESET} {hooks_path}")
 
     _write_skill_file()
+    _write_cursor_rule()
 
     print()
-    print("  Done! Restart Cursor to activate.")
-    print("  Run `skim gain` anytime to see token savings.")
+    print(f"  {GREEN}Done!{RESET} Restart Cursor to activate.")
+    print(f"  Run {BOLD}skim gain{RESET} anytime to see token savings.")
 
 
 def _uninstall_cursor() -> None:
@@ -183,6 +194,20 @@ def _write_skill_file() -> None:
         print(f"  ✓ Created {skill_path}")
     else:
         print(f"  ✓ SKIM.md already exists at {skill_path}")
+
+
+def _write_cursor_rule() -> None:
+    """Write .cursor/rules/skim.mdc to the current project."""
+    rules_dir = Path.cwd() / ".cursor" / "rules"
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    rule_path = rules_dir / "skim.mdc"
+
+    if rule_path.exists():
+        print(f"  ✓ Cursor rule already exists at {rule_path}")
+        return
+
+    rule_path.write_text(_CURSOR_RULE_CONTENT)
+    print(f"  ✓ Created Cursor rule → {rule_path}")
 
 
 def _patch_claude_md() -> None:
@@ -243,5 +268,176 @@ def _uninstall(agent: str) -> None:
         _uninstall_claude()
     elif agent == "cursor":
         _uninstall_cursor()
+    elif agent in ("codex", "copilot", "gemini", "windsurf", "cline"):
+        _uninstall_shell_alias(agent)
     else:
         print(f"skim: uninstall not supported for '{agent}'")
+
+
+# ---------------------------------------------------------------------------
+# Codex (OpenAI Codex CLI)
+# ---------------------------------------------------------------------------
+
+def init_codex() -> None:
+    """Install skim hook for OpenAI Codex CLI.
+
+    Codex uses a similar PreToolUse hook system to Claude Code.
+    Installs via ~/.codex/settings.json.
+    """
+    settings_path = Path.home() / ".codex" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            settings = {}
+    else:
+        settings = {}
+
+    hooks = settings.setdefault("hooks", {})
+    pre_tool: list = hooks.setdefault("PreToolUse", [])
+
+    codex_hook = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "skim hook claude"}],
+    }
+
+    pre_tool[:] = [
+        h for h in pre_tool
+        if "skim" not in str(h.get("hooks", [{}])[0].get("command", ""))
+    ]
+    pre_tool.append(codex_hook)
+
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    print(f"  ✓ Installed Codex hook → {settings_path}")
+
+    _write_skill_file()
+
+    print()
+    print("  Done! Restart Codex to activate.")
+    print("  Run `skim gain` anytime to see token savings.")
+
+
+# ---------------------------------------------------------------------------
+# Copilot (GitHub Copilot CLI)
+# ---------------------------------------------------------------------------
+
+def init_copilot() -> None:
+    """Install skim for GitHub Copilot CLI.
+
+    Copilot doesn't have a PreToolUse hook system. Uses shell alias
+    approach and writes a SKIM.md for agent instructions.
+    """
+    _install_shell_aliases("copilot")
+    _write_skill_file()
+
+    print()
+    print("  Done! Source your shell profile and restart Copilot.")
+    print("  Run `skim gain` anytime to see token savings.")
+
+
+# ---------------------------------------------------------------------------
+# Shell alias approach (Gemini, Windsurf, Cline, etc.)
+# ---------------------------------------------------------------------------
+
+_SHELL_ALIASES = """\
+# skim - AST-aware token optimizer (auto-installed by skim init)
+alias cat='_skim_cat'
+_skim_cat() {
+    local file="$1"
+    case "$file" in
+        *.py|*.ts|*.tsx|*.js|*.jsx|*.rs|*.go|*.java|*.rb|*.c|*.cpp|*.h|*.hpp)
+            skim read "$@"
+            ;;
+        *)
+            command cat "$@"
+            ;;
+    esac
+}
+# end skim aliases
+"""
+
+
+def init_shell_alias(agent: str) -> None:
+    """Install skim via shell aliases for agents without hook APIs.
+
+    This approach wraps ``cat`` to call ``skim read`` for code files.
+    """
+    _install_shell_aliases(agent)
+    _write_skill_file()
+
+    print()
+    print(f"  Done! Source your shell profile and restart {agent}.")
+    print("  Run `skim gain` anytime to see token savings.")
+
+
+def _install_shell_aliases(agent: str) -> None:
+    """Add skim aliases to shell profile."""
+    shell_profile = _detect_shell_profile()
+    if not shell_profile:
+        print("  ⚠ Could not detect shell profile")
+        print(f"  Add the following to your shell profile for {agent}:")
+        print(_SHELL_ALIASES)
+        return
+
+    content = shell_profile.read_text() if shell_profile.exists() else ""
+
+    if "skim" in content and "_skim_cat" in content:
+        print(f"  ✓ Shell aliases already in {shell_profile}")
+        return
+
+    with open(shell_profile, "a") as f:
+        f.write("\n" + _SHELL_ALIASES)
+
+    print(f"  ✓ Added shell aliases to {shell_profile}")
+
+
+def _uninstall_shell_alias(agent: str) -> None:
+    """Remove skim shell aliases."""
+    shell_profile = _detect_shell_profile()
+    if not shell_profile or not shell_profile.exists():
+        print(f"  No shell profile found for {agent}.")
+        return
+
+    content = shell_profile.read_text()
+    if "# skim - AST-aware token optimizer" not in content:
+        print(f"  No skim aliases found in {shell_profile}.")
+        return
+
+    # Remove the skim alias block
+    lines = content.split("\n")
+    new_lines: list[str] = []
+    in_skim_block = False
+    for line in lines:
+        if "# skim - AST-aware token optimizer" in line:
+            in_skim_block = True
+            continue
+        if in_skim_block and "# end skim aliases" in line:
+            in_skim_block = False
+            continue
+        if not in_skim_block:
+            new_lines.append(line)
+
+    shell_profile.write_text("\n".join(new_lines))
+    print(f"  ✓ Removed skim aliases from {shell_profile}")
+
+
+def _detect_shell_profile() -> Path | None:
+    """Detect the user's shell profile file."""
+    import os
+
+    shell = os.environ.get("SHELL", "/bin/bash")
+
+    if "zsh" in shell:
+        return Path.home() / ".zshrc"
+    elif "bash" in shell:
+        bashrc = Path.home() / ".bashrc"
+        bash_profile = Path.home() / ".bash_profile"
+        if bashrc.exists():
+            return bashrc
+        return bash_profile
+    elif "fish" in shell:
+        return Path.home() / ".config" / "fish" / "config.fish"
+
+    return Path.home() / ".bashrc"

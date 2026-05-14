@@ -95,20 +95,24 @@ def cmd_gain(args) -> None:
 def cmd_session(args) -> None:
     """Show or manage current session."""
     from skim.session import SessionManager
+    from skim.style import BOLD, DIM, RESET, CYAN, GREEN, YELLOW, CHECK, hline
 
     session = SessionManager()
 
     if args.action == "clear":
         session.clear()
-        print("skim: session cache cleared")
+        print(f"  {CHECK} Session cache cleared")
     else:
         info = session.info()
-        print(f"skim session")
-        print(f"  entries:      {info['entries']}")
-        print(f"  total saved:  {info['total_saved_tokens']:,} tokens")
-        print(f"  session file: {info['state_path']}")
+        print()
+        print(f"  {BOLD}{CYAN}skim{RESET} {DIM}session{RESET}")
+        print(f"  {hline(40)}")
+        print(f"  {DIM}entries{RESET}      {BOLD}{info['entries']}{RESET}")
+        print(f"  {DIM}total saved{RESET}  {GREEN}{info['total_saved_tokens']:,}{RESET} tokens")
+        print(f"  {DIM}state file{RESET}  {DIM}{info['state_path']}{RESET}")
         if info["started_at"]:
-            print(f"  started:      {info['started_at']}")
+            print(f"  {DIM}started{RESET}     {info['started_at']}")
+        print()
 
 
 def cmd_git(args) -> None:
