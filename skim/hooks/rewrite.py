@@ -188,12 +188,9 @@ def _rewrite_single(cmd: str) -> str | None:
     if not cmd:
         return None
 
-    # Pipe handling: only rewrite the first command in a pipe
+    # Never rewrite piped commands — downstream consumers (grep, wc, head)
+    # expect full raw content, not structural summaries.
     if "|" in cmd and "||" not in cmd:
-        pipe_parts = cmd.split("|", 1)
-        rewritten_first = _rewrite_single(pipe_parts[0].strip())
-        if rewritten_first:
-            return f"{rewritten_first} | {pipe_parts[1].strip()}"
         return None
 
     try:

@@ -40,9 +40,10 @@ class TestRewriteCommand:
         result = rewrite_command("cat file.py && git status")
         assert result == "skim read file.py && skim git status"
 
-    def test_pipe(self):
-        result = rewrite_command("cat main.py | grep test")
-        assert result == "skim read main.py | grep test"
+    def test_pipe_not_rewritten(self):
+        assert rewrite_command("cat main.py | grep test") is None
+        assert rewrite_command("cat main.py | wc -l") is None
+        assert rewrite_command("git status | grep modified") is None
 
     def test_already_skim(self):
         assert rewrite_command("skim read file.py") is None

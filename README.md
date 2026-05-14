@@ -14,54 +14,102 @@ Works with **Claude Code**, **Cursor**, **Copilot**, **Codex**, **Gemini CLI**, 
 
 ## Before vs After
 
+### Without skim — raw file dump (487 lines, ~4,000 tokens)
+
+```python
+$ cat src/auth/service.py
+
+import hashlib
+import secrets
+from datetime import datetime, timedelta
+from dataclasses import dataclass
+from typing import Optional
+
+from .database import UserRepository
+from .models import User, Session
+from .exceptions import AuthError, TokenExpiredError
+
+
+@dataclass
+class AuthResult:
+    success: bool
+    token: Optional[str] = None
+    error: Optional[str] = None
+
+
+class AuthService:
+    def __init__(self, repo: UserRepository, secret: str):
+        self._repo = repo
+        self._secret = secret
+
+    async def login(self, email: str, password: str) -> AuthResult:
+        user = await self._repo.find_by_email(email)
+        if not user:
+            return AuthResult(success=False, error="User not found")
+        if not self._verify_password(password, user.password_hash):
+            return AuthResult(success=False, error="Invalid password")
+        token = self._generate_token(user.id)
+        await self._repo.save_session(Session(user_id=user.id, token=token))
+        return AuthResult(success=True, token=token)
+
+    # ... 450 more lines: logout, verify_token, refresh, reset_password,
+    #     _hash_password, _verify_password, _generate_token, validate_email,
+    #     rate_limit, session_cleanup, admin_revoke_all, ...
 ```
-# WITHOUT skim — agent reads 487 lines of raw code
-$ cat src/auth/login.ts
-import { createHash } from 'crypto';
-import { readFileSync, writeFileSync } from 'fs';
-... (487 lines of code) ...
-→ ~4,000 tokens consumed
 
-# WITH skim — agent gets structural summary
-$ skim read src/auth/login.ts
-// src/auth/login.ts  487 lines  12 exports  23 symbols
-// imports: crypto, fs, path
+The AI agent consumes **all 487 lines** just to understand what this file does.
 
-export async function login(email: string, password: string): Promise<Session>
-export async function logout(sessionId: string): Promise<void>
-export function validateToken(token: string): boolean
-export class AuthService
-  constructor(private repo: UserRepository)
-  async login(email: string, password: string): Promise<AuthResult>
-  verifyToken(token: string): { valid: boolean; userId?: string }
-export type Session = { id: string; userId: string; expiresAt: Date }
+### With skim — structural summary (15 lines, ~120 tokens)
 
-// [487 lines → 15 lines (97% reduction)]
-// [skim read src/auth/login.ts:<symbol> for full function]
-→ ~120 tokens consumed
+```python
+$ skim read src/auth/service.py
+
+# src/auth/service.py  487 lines  4 exports  12 symbols
+# imports: hashlib, secrets, datetime, dataclasses, typing, .database, .models, .exceptions
+
+class AuthResult
+    success: bool
+    token: Optional[str]
+    error: Optional[str]
+class AuthService
+    def __init__(self, repo: UserRepository, secret: str)
+    async def login(self, email: str, password: str) -> AuthResult
+    async def logout(self, session_id: str) -> None
+    def verify_token(self, token: str) -> dict
+    def refresh(self, token: str) -> AuthResult
+    async def reset_password(self, email: str) -> None
+    def _hash_password(self, password: str) -> str
+    def _verify_password(self, password: str, hash: str) -> bool
+    def _generate_token(self, user_id: int) -> str
+    def validate_email(self, email: str) -> bool
+
+# [487 lines → 15 lines · 97% reduction]
+# [skim read src/auth/service.py:<symbol> for full function]
 ```
 
-**Then drill into what you need:**
+**97% fewer tokens.** The agent sees the full architecture — every function, every type, every import — without reading a single function body.
+
+### Need the implementation? Drill in.
+
+```python
+$ skim read src/auth/service.py:AuthService.login
+
+    async def login(self, email: str, password: str) -> AuthResult:
+        user = await self._repo.find_by_email(email)
+        if not user:
+            return AuthResult(success=False, error="User not found")
+        if not self._verify_password(password, user.password_hash):
+            return AuthResult(success=False, error="Invalid password")
+        token = self._generate_token(user.id)
+        await self._repo.save_session(Session(user_id=user.id, token=token))
+        return AuthResult(success=True, token=token)
+```
+
+### Read the same file again? Zero cost.
 
 ```
-$ skim read src/auth/login.ts:AuthService.login
-  async login(email: string, password: string): Promise<AuthResult> {
-    const user = await this.repo.findByEmail(email);
-    if (!user) {
-      return { success: false, error: 'User not found' };
-    }
-    const hash = this.hashPassword(password);
-    const token = this.generateToken(user.id);
-    return { success: true, token };
-  }
-```
-
-**Session dedup — re-reading unchanged files:**
-
-```
-$ skim read src/auth/login.ts
-[unchanged since 3m ago]
-→ 4 tokens (99.9% savings)
+$ skim read src/auth/service.py
+[unchanged since 3m ago]             → 4 tokens (99.9% savings)
 ```
 
 ---
