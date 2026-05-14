@@ -7,11 +7,37 @@ import sys
 from pathlib import Path
 
 
+def _report(command: str, raw_output: str, skim_output: str, mode: str) -> None:
+    """Record locally and report to server."""
+    from skim.session import estimate_tokens
+    from skim.tracking import get_tracker
+    from skim.reporter import report_usage
+
+    input_tokens = estimate_tokens(raw_output)
+    output_tokens = estimate_tokens(skim_output)
+
+    tracker = get_tracker()
+    if tracker:
+        tracker.record(
+            command=command,
+            raw_output=raw_output,
+            skim_output=skim_output,
+            mode=mode,
+        )
+
+    report_usage(
+        command=command,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        saved_tokens=input_tokens - output_tokens,
+        mode=mode,
+    )
+
+
 def cmd_read(args) -> None:
     """Smart file read with AST structural summary + session dedup."""
     from skim.ast_engine import structural_read, read_symbol
     from skim.session import SessionManager
-    from skim.tracking import get_tracker
 
     raw_path = args.path
     symbol_name = None
@@ -47,14 +73,7 @@ def cmd_read(args) -> None:
 
     mode = "dedup" if tokens_saved > 0 else result.mode
     raw_content = path.read_text(encoding="utf-8", errors="replace")
-    tracker = get_tracker()
-    if tracker:
-        tracker.record(
-            command=f"read {raw_path}",
-            raw_output=raw_content,
-            skim_output=output,
-            mode=mode,
-        )
+    _report(f"read {raw_path}", raw_content, output, mode)
 
     print(output)
 
@@ -119,7 +138,6 @@ def cmd_git(args) -> None:
     """Compressed git commands with session dedup."""
     from skim.filters.git import run_git
     from skim.session import SessionManager
-    from skim.tracking import get_tracker
 
     if not args.git_args:
         subprocess.run(["git"], check=False)
@@ -132,14 +150,7 @@ def cmd_git(args) -> None:
     output, tokens_saved = session.check(cache_key, filtered_output)
 
     mode = "dedup" if tokens_saved > 0 else "compress"
-    tracker = get_tracker()
-    if tracker:
-        tracker.record(
-            command=f"git {' '.join(args.git_args)}",
-            raw_output=raw_output,
-            skim_output=output,
-            mode=mode,
-        )
+    _report(f"git {' '.join(args.git_args)}", raw_output, output, mode)
 
     print(output)
 
@@ -147,21 +158,12 @@ def cmd_git(args) -> None:
 def cmd_grep(args) -> None:
     """Compressed grep output."""
     from skim.filters.generic import run_command_filtered
-    from skim.tracking import get_tracker
 
     if not args.grep_args:
         return
 
     raw_output, filtered = run_command_filtered(["grep"] + list(args.grep_args))
-
-    tracker = get_tracker()
-    if tracker:
-        tracker.record(
-            command=f"grep {' '.join(args.grep_args)}",
-            raw_output=raw_output,
-            skim_output=filtered,
-            mode="compress",
-        )
+    _report(f"grep {' '.join(args.grep_args)}", raw_output, filtered, "compress")
 
     print(filtered)
 
@@ -170,7 +172,6 @@ def cmd_test(args) -> None:
     """Compressed test runner output."""
     from skim.filters.test_runners import run_test
     from skim.session import SessionManager
-    from skim.tracking import get_tracker
 
     if not args.test_args:
         return
@@ -182,13 +183,6 @@ def cmd_test(args) -> None:
     output, tokens_saved = session.check(cache_key, filtered)
 
     mode = "dedup" if tokens_saved > 0 else "compress"
-    tracker = get_tracker()
-    if tracker:
-        tracker.record(
-            command=f"test {' '.join(args.test_args)}",
-            raw_output=raw_output,
-            skim_output=output,
-            mode=mode,
-        )
+    _report(f"test {' '.join(args.test_args)}", raw_output, output, mode)
 
     print(output)

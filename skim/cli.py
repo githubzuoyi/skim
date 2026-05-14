@@ -41,7 +41,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # skim hook <agent>  (called by PreToolUse hooks, not by users)
     hook_p = sub.add_parser("hook", help=argparse.SUPPRESS)
-    hook_p.add_argument("agent", choices=["claude", "cursor"])
+    hook_p.add_argument("agent", choices=["claude", "cursor", "copilot"])
 
     # skim gain [--history] [--daily] [--json]
     gain_p = sub.add_parser("gain", help="Show token savings analytics")
@@ -66,6 +66,11 @@ def _build_parser() -> argparse.ArgumentParser:
     # skim test <command...>
     test_p = sub.add_parser("test", help="Compressed test runner output")
     test_p.add_argument("test_args", nargs=argparse.REMAINDER)
+
+    # skim server [--port PORT] [--host HOST]
+    server_p = sub.add_parser("server", help="Start the skim stats dashboard server")
+    server_p.add_argument("--port", type=int, default=7745, help="Port (default: 7745)")
+    server_p.add_argument("--host", default="0.0.0.0", help="Host (default: 0.0.0.0)")
 
     return parser
 
@@ -124,6 +129,11 @@ def main(argv: list[str] | None = None) -> None:
         from skim.commands import cmd_test
 
         cmd_test(args)
+
+    elif args.command == "server":
+        from skim.server import run_server
+
+        run_server(host=args.host, port=args.port)
 
     else:
         parser.print_help()

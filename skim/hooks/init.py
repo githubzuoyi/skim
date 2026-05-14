@@ -14,6 +14,8 @@ from pathlib import Path
 from skim.hooks.constants import (
     CLAUDE_HOOK,
     CLAUDE_MD_PATCH,
+    COPILOT_HOOK_JSON,
+    COPILOT_INSTRUCTIONS,
     CURSOR_HOOK_CONFIG,
     SKILL_CONTENT,
     _CURSOR_RULE_CONTENT,
@@ -36,6 +38,8 @@ def cmd_init(args) -> None:
         _uninstall(agent)
         return
 
+    _collect_email_if_needed()
+
     if agent == "claude":
         init_claude_global()
     elif agent == "cursor":
@@ -50,6 +54,40 @@ def cmd_init(args) -> None:
         print(f"skim: agent '{agent}' hook installation not yet supported", file=sys.stderr)
         print("Supported agents: claude, cursor, codex, copilot, gemini, windsurf, cline", file=sys.stderr)
         sys.exit(1)
+
+
+def _collect_email_if_needed() -> None:
+    """Prompt for BATWTechworks email if not already saved."""
+    from skim.config import get_config, save_user_email
+    from skim.style import BOLD, DIM, RESET, CYAN, GREEN, YELLOW
+
+    config = get_config()
+    if config.user.email:
+        return
+
+    print()
+    print(f"  {BOLD}{CYAN}skim{RESET} {DIM}internal usage tracking{RESET}")
+    print(f"  {DIM}Usage data is collected for BATWTechworks internal statistics only.{RESET}")
+    print()
+
+    while True:
+        try:
+            email = input(f"  {BOLD}Enter your BATWTechworks email:{RESET} ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            print(f"  {YELLOW}Skipped.{RESET} You can set it later in ~/.config/skim/config.toml")
+            return
+
+        if not email:
+            continue
+
+        if email.endswith("@batechworks.com"):
+            save_user_email(email)
+            print(f"  {GREEN}✓{RESET} Saved: {email}")
+            print()
+            return
+
+        print(f"  {YELLOW}✗{RESET} Email must end with {BOLD}@batechworks.com{RESET}, please try again.")
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +292,18 @@ def _show_status(agent: str) -> None:
         else:
             print(f"  ✗ No hooks.json found at {hooks_path}")
 
+    elif agent == "copilot":
+        hook_path = Path.cwd() / ".github" / "hooks" / "skim-rewrite.json"
+        inst_path = Path.cwd() / ".github" / "copilot-instructions.md"
+        if hook_path.exists():
+            print(f"  ✓ Hook config installed at {hook_path}")
+        else:
+            print(f"  ✗ No hook config found (expected {hook_path})")
+        if inst_path.exists():
+            print(f"  ✓ Instructions installed at {inst_path}")
+        else:
+            print(f"  ✗ No instructions found (expected {inst_path})")
+
     # Check for skim binary
     skim_path = shutil.which("skim")
     if skim_path:
@@ -320,21 +370,38 @@ def init_codex() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Copilot (GitHub Copilot CLI)
+# Copilot (GitHub Copilot — VS Code + CLI)
 # ---------------------------------------------------------------------------
 
 def init_copilot() -> None:
-    """Install skim for GitHub Copilot CLI.
+    """Install skim hook for GitHub Copilot (project-scoped).
 
-    Copilot doesn't have a PreToolUse hook system. Uses shell alias
-    approach and writes a SKIM.md for agent instructions.
+    Creates:
+    - .github/hooks/skim-rewrite.json — PreToolUse hook config
+    - .github/copilot-instructions.md — AI instructions for skim usage
     """
-    _install_shell_aliases("copilot")
+    from skim.style import CHECK, BOLD, DIM, RESET, GREEN
+
+    github_dir = Path.cwd() / ".github"
+    hooks_dir = github_dir / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+
+    hook_path = hooks_dir / "skim-rewrite.json"
+    hook_path.write_text(json.dumps(COPILOT_HOOK_JSON, indent=2) + "\n")
+    print(f"  {CHECK} Installed Copilot hook {DIM}→{RESET} {hook_path}")
+
+    instructions_path = github_dir / "copilot-instructions.md"
+    instructions_path.write_text(COPILOT_INSTRUCTIONS)
+    print(f"  {CHECK} Created Copilot instructions {DIM}→{RESET} {instructions_path}")
+
     _write_skill_file()
 
     print()
-    print("  Done! Source your shell profile and restart Copilot.")
-    print("  Run `skim gain` anytime to see token savings.")
+    print(f"  {GREEN}Done!{RESET} Restart VS Code / Copilot CLI to activate.")
+    print(f"  Run {BOLD}skim gain{RESET} anytime to see token savings.")
+    print()
+    print(f"  {DIM}Works with VS Code Copilot Chat (transparent rewrite)")
+    print(f"  and Copilot CLI (auto-detect).{RESET}")
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 These are called by agent hooks (not by users directly):
 - ``skim hook claude`` — reads JSON from stdin, rewrites command, outputs JSON
 - ``skim hook cursor`` — similar protocol for Cursor
+- ``skim hook copilot`` — similar protocol for GitHub Copilot
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ def cmd_hook(args) -> None:
         run_claude_hook()
     elif args.agent == "cursor":
         run_cursor_hook()
+    elif args.agent == "copilot":
+        run_copilot_hook()
 
 
 def run_claude_hook() -> None:
@@ -92,5 +95,45 @@ def run_cursor_hook() -> None:
         output = {
             "permissionDecision": "allow",
             "updatedToolInput": {"command": rewritten},
+        }
+        print(json.dumps(output))
+
+
+def run_copilot_hook() -> None:
+    """Called by GitHub Copilot PreToolUse hook (.github/hooks/skim-rewrite.json).
+
+    Copilot agent mode uses the same protocol as Claude Code:
+    - VS Code Copilot Chat: transparent rewrite via updatedInput
+    - Copilot CLI: same protocol
+
+    Protocol:
+    - Input: ``{"tool_name": "Bash", "tool_input": {"command": "cat file.py"}}``
+    - Output: JSON with ``hookSpecificOutput`` containing rewritten command
+    """
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            return
+
+        hook_input = json.loads(raw)
+    except (json.JSONDecodeError, IOError):
+        return
+
+    tool_name = hook_input.get("tool_name", "")
+    if tool_name not in ("Bash", "terminal", "runCommand"):
+        return
+
+    command = hook_input.get("tool_input", {}).get("command", "")
+    if not command:
+        return
+
+    rewritten = rewrite_command(command)
+    if rewritten and rewritten != command:
+        output = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedToolInput": {"command": rewritten},
+            }
         }
         print(json.dumps(output))

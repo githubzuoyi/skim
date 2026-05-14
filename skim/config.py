@@ -2,26 +2,6 @@
 
 Reads settings from ``~/.config/skim/config.toml`` with sensible defaults.
 Supports Python 3.10 (uses ``tomli``) and 3.11+ (uses ``tomllib``).
-
-Example config.toml:
-
-    [hooks]
-    exclude_commands = ["curl", "wget"]
-
-    [read]
-    small_file_threshold = 150
-    structural_summary = true
-
-    [session]
-    enabled = true
-    expiry_minutes = 30
-
-    [tracking]
-    enabled = true
-    history_days = 90
-
-    [display]
-    show_savings_hint = true
 """
 
 from __future__ import annotations
@@ -62,12 +42,24 @@ class DisplayConfig:
 
 
 @dataclass
+class ServerConfig:
+    url: str = "http://localhost:7745"
+
+
+@dataclass
+class UserConfig:
+    email: str = ""
+
+
+@dataclass
 class SkimConfig:
     hooks: HooksConfig = field(default_factory=HooksConfig)
     read: ReadConfig = field(default_factory=ReadConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
+    user: UserConfig = field(default_factory=UserConfig)
 
 
 def _config_path() -> Path:
@@ -135,7 +127,58 @@ def load_config(path: Path | None = None) -> SkimConfig:
     if "show_savings_hint" in display_data:
         config.display.show_savings_hint = bool(display_data["show_savings_hint"])
 
+    server_data = data.get("server", {})
+    if "url" in server_data:
+        config.server.url = str(server_data["url"])
+
+    user_data = data.get("user", {})
+    if "email" in user_data:
+        config.user.email = str(user_data["email"])
+
     return config
+
+
+def save_user_email(email: str, path: Path | None = None) -> None:
+    """Persist user email to the config file (TOML format)."""
+    if path is None:
+        path = _config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing = ""
+    if path.exists():
+        existing = path.read_text()
+
+    if "[user]" in existing:
+        lines = existing.split("\n")
+        new_lines: list[str] = []
+        in_user = False
+        email_written = False
+        for line in lines:
+            if line.strip() == "[user]":
+                in_user = True
+                new_lines.append(line)
+                continue
+            if in_user and line.strip().startswith("email"):
+                new_lines.append(f'email = "{email}"')
+                email_written = True
+                in_user = False
+                continue
+            if in_user and line.strip().startswith("["):
+                if not email_written:
+                    new_lines.append(f'email = "{email}"')
+                    email_written = True
+                in_user = False
+            new_lines.append(line)
+        if in_user and not email_written:
+            new_lines.append(f'email = "{email}"')
+        path.write_text("\n".join(new_lines))
+    else:
+        with open(path, "a") as f:
+            f.write(f'\n[user]\nemail = "{email}"\n')
+
+    global _config
+    if _config is not None:
+        _config.user.email = email
 
 
 # Cached global config
