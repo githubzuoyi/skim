@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "skim hook copilot",
+        "cwd": ".",
+        "timeout": 5
+      }
+    ]
+  }
+}
