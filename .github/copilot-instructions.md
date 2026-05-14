@@ -1,41 +1,46 @@
 ---
-description: Use skim for token-efficient code reading. Always prefer skim read over read_file for exploring code files.
+description: skim is installed. Large code files are automatically summarized when read. Use skim read for drill-down.
 applyTo: "**/*.{py,ts,tsx,js,jsx,rs,go,java,rb,c,cpp,h,hpp,swift,kt}"
 ---
 
 # skim — Token-Efficient Code Reading
 
-This project has `skim` installed. You MUST use `skim read` via terminal
-instead of `read_file` when exploring code. This saves 80-97% tokens.
+This project has `skim` installed. It **automatically intercepts** your
+file reads on large code files (>150 lines) and returns a structural
+summary (function/class signatures) instead of the full content.
+This happens transparently — you don't need to change how you work.
 
-## Rule: Use `skim read` for code exploration
+## What you'll see
 
-When you want to understand what a code file contains, **always run
-`skim read` in the terminal** instead of using `read_file`:
+When you read a large code file, you'll get something like:
 
-```bash
-# See all functions, classes, types in a file (use this FIRST)
-skim read src/auth/service.py
+```
+// src/auth/service.py  487 lines  4 exports  12 symbols
+// imports: hashlib, secrets, datetime, ...
 
-# Read a specific function body
-skim read src/auth/service.py:login
+class AuthService
+    def __init__(self, repo: UserRepository, secret: str)
+    async def login(self, email: str, password: str) -> AuthResult
+    async def logout(self, session_id: str) -> None
+    def verify_token(self, token: str) -> dict
 
-# Read a specific method
-skim read src/auth/service.py:AuthService.verify
+// [487 lines → 15 lines · 97% reduction]
+// [skim read src/auth/service.py:<symbol> for full function]
 ```
 
-This returns a structural summary (function/class signatures only),
-saving 80-97% of tokens compared to reading the full file.
+## Drill into specific functions
 
-## When to use `read_file` (built-in)
+When you need the implementation of a specific function, run in terminal:
 
-Only use `read_file` when:
-- You are about to **edit** a file and need exact line numbers
-- You need **exact indentation or whitespace** for a code change
-- The file is a **non-code file** (JSON, YAML, Markdown, config, etc.)
-- You already used `skim read` and now need the full implementation
+```bash
+skim read src/auth/service.py:login          # specific function
+skim read src/auth/service.py:AuthService    # entire class
+```
 
-If you need the complete content of a code file:
+## Get complete file content
+
+When you need the full file (e.g., before editing), run in terminal:
+
 ```bash
 skim read src/auth/service.py --full
 ```
@@ -45,18 +50,9 @@ skim read src/auth/service.py --full
 ```bash
 skim git status    # compact status output
 skim git diff      # compressed diff
-skim git log       # one-line format
 skim test pytest   # failures-only summary
 ```
 
-## Workflow
+## Analytics
 
-1. **Explore**: `skim read file.py` → see structure
-2. **Drill in**: `skim read file.py:function_name` → see implementation
-3. **Edit**: use `read_file` for exact lines, then make changes
-4. **Verify**: `skim git diff` to check changes
-
-## Key point
-
-Re-reading unchanged files returns `[unchanged]` (near-zero tokens).
 Run `skim gain` in terminal to see cumulative token savings.
