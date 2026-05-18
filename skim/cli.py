@@ -48,6 +48,11 @@ def _build_parser() -> argparse.ArgumentParser:
     gain_p.add_argument("--history", action="store_true", help="Show recent command history")
     gain_p.add_argument("--daily", action="store_true", help="Day-by-day breakdown")
     gain_p.add_argument("--json", action="store_true", help="JSON output")
+    gain_p.add_argument(
+        "--all-projects",
+        action="store_true",
+        help="Aggregate across all tracked projects instead of the current working directory",
+    )
     gain_p.add_argument("--days", type=int, default=30, help="Number of days (default: 30)")
     gain_p.add_argument("--reset", action="store_true", help="Reset analytics data")
     gain_p.add_argument(

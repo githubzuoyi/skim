@@ -97,7 +97,11 @@ def cmd_gain(args) -> None:
         print("skim: analytics data reset")
         return
 
-    summary = tracker.gain_summary(days=args.days, session_log_path=args.session_log)
+    summary = tracker.gain_summary(
+        days=args.days,
+        session_log_path=args.session_log,
+        all_projects=args.all_projects,
+    )
 
     if args.json:
         import json
@@ -106,11 +110,11 @@ def cmd_gain(args) -> None:
         return
 
     if args.history:
-        tracker.print_history()
+        tracker.print_history(project=None if args.all_projects else summary.get("scope_project"))
         return
 
     if args.daily:
-        tracker.print_daily(days=args.days)
+        tracker.print_daily(days=args.days, project=None if args.all_projects else summary.get("scope_project"))
         return
 
     tracker.print_summary(summary)

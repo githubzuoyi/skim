@@ -73,6 +73,34 @@ class TestTracker:
         tracker.close()
         db.unlink(missing_ok=True)
 
+    def test_gain_summary_defaults_to_current_project_scope(self, tmp_path, monkeypatch):
+        project_dir = tmp_path / "project-alpha"
+        project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
+
+        tracker, db = self._make_tracker()
+        tracker.record("read alpha.py", "x" * 4000, "x" * 200, "structural")
+        tracker.record(
+            "read beta.py",
+            "y" * 4000,
+            "y" * 200,
+            "structural",
+            project="project-beta",
+        )
+
+        scoped = tracker.gain_summary()
+        all_projects = tracker.gain_summary(all_projects=True)
+
+        assert scoped["scope_project"] == "project-alpha"
+        assert scoped["total_operations"] == 1
+        assert scoped["total_tokens_saved"] == 950
+        assert all_projects["scope_project"] is None
+        assert all_projects["total_operations"] == 2
+        assert all_projects["total_tokens_saved"] == 1900
+
+        tracker.close()
+        db.unlink(missing_ok=True)
+
     def test_gain_summary_includes_latest_copilot_session_share(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         tracker, db = self._make_tracker()
@@ -209,6 +237,64 @@ class TestTracker:
         assert latest["skim_input_tokens"] == 1000
         assert latest["skim_saved_tokens"] == 950
         assert tracker._conn.execute("SELECT DISTINCT session_id FROM commands").fetchall() == [
+            ("session-live",),
+        ]
+
+        tracker.close()
+        db.unlink(missing_ok=True)
+
+    def test_gain_summary_backfills_late_legacy_rows_into_existing_active_session(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        tracker, db = self._make_tracker()
+
+        session_ts = 1_800_000_000.0
+        session_dir = tmp_path / "session-live"
+        session_dir.mkdir()
+        session_log = session_dir / "main.jsonl"
+
+        monkeypatch.setenv("VSCODE_TARGET_SESSION_LOG", str(session_log))
+        monkeypatch.setattr("skim.tracking.time.time", lambda: session_ts + 5)
+        tracker.record(
+            "read current.py",
+            "x" * 4000,
+            "x" * 200,
+            "structural",
+            session_id="session-live",
+        )
+
+        monkeypatch.setattr("skim.tracking.time.time", lambda: session_ts + 10)
+        tracker.record(
+            "read late.py",
+            "y" * 2000,
+            "y" * 200,
+            "structural",
+            session_id="12345",
+        )
+
+        session_log.write_text(
+            json.dumps(
+                {
+                    "ts": int(session_ts * 1000),
+                    "dur": 15000,
+                    "type": "llm_request",
+                    "attrs": {
+                        "inputTokens": 5000,
+                        "outputTokens": 120,
+                        "cachedTokens": 1000,
+                    },
+                }
+            )
+            + "\n"
+        )
+
+        summary = tracker.gain_summary()
+        latest = summary["latest_copilot_session"]
+
+        assert latest is not None
+        assert latest["skim_input_tokens"] == 1500
+        assert latest["skim_saved_tokens"] == 1400
+        assert latest["skim_share_of_non_cached_input_pct"] == round(1400 / 4000 * 100, 1)
+        assert tracker._conn.execute("SELECT DISTINCT session_id FROM commands ORDER BY session_id").fetchall() == [
             ("session-live",),
         ]
 

@@ -184,22 +184,32 @@ class Tracker:
         self._conn.commit()
         return int(cursor.rowcount or 0)
 
-    def gain_summary(self, days: int = 30, *, session_log_path: str | Path | None = None) -> dict[str, Any]:
+    def gain_summary(
+        self,
+        days: int = 30,
+        *,
+        session_log_path: str | Path | None = None,
+        all_projects: bool = False,
+    ) -> dict[str, Any]:
         """Return aggregate statistics for the gain command."""
         cutoff = time.time() - (days * 86400)
         pricing = resolve_pricing_model()
+        project = None if all_projects else _current_project_name()
 
-        rows = self._conn.execute(
-            """SELECT mode,
-                      COUNT(*) as ops,
-                      COALESCE(SUM(input_tokens), 0) as total_input,
-                      COALESCE(SUM(saved_tokens), 0) as total_saved
-               FROM commands
-               WHERE timestamp >= ?
-               GROUP BY mode
-               ORDER BY total_saved DESC""",
-            (cutoff,),
-        ).fetchall()
+        query = (
+            "SELECT mode, "
+            "COUNT(*) as ops, "
+            "COALESCE(SUM(input_tokens), 0) as total_input, "
+            "COALESCE(SUM(saved_tokens), 0) as total_saved "
+            "FROM commands WHERE timestamp >= ?"
+        )
+        params: list[Any] = [cutoff]
+        if project:
+            query += " AND project = ?"
+            params.append(project)
+        query += " GROUP BY mode ORDER BY total_saved DESC"
+
+        rows = self._conn.execute(query, tuple(params)).fetchall()
 
         modes: list[dict] = []
         grand_ops = 0
@@ -225,7 +235,6 @@ class Tracker:
         grand_output = grand_input - grand_saved
         grand_pct = savings_pct(grand_input, grand_output)
         est_cost_saved = estimate_input_cost(max(grand_saved, 0), pricing.key)
-        project = _current_project_name()
         latest_copilot_session = self._latest_copilot_session_for_project(
             project=project,
             session_log_path=session_log_path,
@@ -233,6 +242,8 @@ class Tracker:
 
         return {
             "days": days,
+            "scope_project": project,
+            "scope_label": f"project:{project}" if project else "all-projects",
             "modes": modes,
             "pricing_model": pricing.key,
             "pricing_display_name": pricing.display_name,
@@ -265,7 +276,7 @@ class Tracker:
                 parsed["session_id"],
                 project=project,
             )
-            if session_totals["operations"] == 0 and session_log_path is None:
+            if session_log_path is None:
                 adopted = self._adopt_legacy_session_rows(
                     parsed["session_id"],
                     parsed["start_time"] - 5,
@@ -310,8 +321,14 @@ class Tracker:
             BRIGHT_CYAN, hline, fmt_savings, SAVED,
         )
 
+        scope_project = summary.get("scope_project")
+        scope_suffix = f" · {scope_project}" if scope_project else " · all projects"
+
         print()
-        print(f"  {BOLD}{BRIGHT_CYAN}skim{RESET}  {DIM}Token Savings (last {summary['days']} days){RESET}")
+        print(
+            f"  {BOLD}{BRIGHT_CYAN}skim{RESET}  "
+            f"{DIM}Token Savings (last {summary['days']} days{scope_suffix}){RESET}"
+        )
         print()
 
         # Table header
@@ -381,15 +398,22 @@ class Tracker:
 
         print()
 
-    def print_history(self, limit: int = 50) -> None:
+    def print_history(self, limit: int = 50, project: str | None = None) -> None:
         """Print recent command history."""
         from skim.style import BOLD, DIM, RESET, CYAN, YELLOW, GREEN, WHITE, hline
 
-        rows = self._conn.execute(
-            """SELECT timestamp, command, input_tokens, saved_tokens, mode
-               FROM commands ORDER BY timestamp DESC LIMIT ?""",
-            (limit,),
-        ).fetchall()
+        query = (
+            "SELECT timestamp, command, input_tokens, saved_tokens, mode "
+            "FROM commands"
+        )
+        params: list[Any] = []
+        if project:
+            query += " WHERE project = ?"
+            params.append(project)
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+
+        rows = self._conn.execute(query, tuple(params)).fetchall()
 
         if not rows:
             print(f"  {DIM}No history recorded yet.{RESET}")
@@ -410,20 +434,22 @@ class Tracker:
             )
         print()
 
-    def print_daily(self, days: int = 30) -> None:
+    def print_daily(self, days: int = 30, project: str | None = None) -> None:
         """Print day-by-day breakdown."""
         from skim.style import BOLD, DIM, RESET, YELLOW, WHITE, GREEN, hline
 
         cutoff = time.time() - (days * 86400)
-        rows = self._conn.execute(
-            """SELECT date(timestamp, 'unixepoch', 'localtime') as day,
-                      COUNT(*) as ops,
-                      SUM(saved_tokens) as saved
-               FROM commands
-               WHERE timestamp >= ?
-               GROUP BY day ORDER BY day""",
-            (cutoff,),
-        ).fetchall()
+        query = (
+            "SELECT date(timestamp, 'unixepoch', 'localtime') as day, "
+            "COUNT(*) as ops, SUM(saved_tokens) as saved "
+            "FROM commands WHERE timestamp >= ?"
+        )
+        params: list[Any] = [cutoff]
+        if project:
+            query += " AND project = ?"
+            params.append(project)
+        query += " GROUP BY day ORDER BY day"
+        rows = self._conn.execute(query, tuple(params)).fetchall()
 
         if not rows:
             print(f"  {DIM}No data for this period.{RESET}")
