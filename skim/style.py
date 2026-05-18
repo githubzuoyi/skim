@@ -92,7 +92,13 @@ def savings_color(pct: int) -> str:
 def fmt_savings(pct: int) -> str:
     """Format a savings percentage with color."""
     color = savings_color(pct)
-    return f"{color}-{pct}%{RESET}"
+    if pct > 0:
+        label = f"-{pct}%"
+    elif pct < 0:
+        label = f"+{abs(pct)}%"
+    else:
+        label = "0%"
+    return f"{color}{label}{RESET}"
 
 
 def fmt_number(n: int) -> str:

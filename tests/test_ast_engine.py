@@ -1,6 +1,10 @@
 """Tests for skim.ast_engine."""
 
+import importlib.util
 from pathlib import Path
+
+import pytest
+
 from skim.ast_engine import structural_read, read_symbol, LANGUAGES
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -22,6 +26,40 @@ class TestStructuralRead:
         assert "hash_password" in result.content
         assert result.symbols_count > 0
 
+    def test_structural_summary_includes_line_spans(self):
+        result = structural_read(FIXTURES / "sample.py", small_file_threshold=50)
+
+        assert "class UserService  [L13-L53]" in result.content
+        assert "def get_user(self, user_id: int) -> Optional[dict]  [L20-L28]" in result.content
+        assert "def hash_password(password: str, salt: Optional[str] = None) -> str  [L76-L82]" in result.content
+        assert "skim tokens ~" in result.content
+        assert "saved ~" in result.content
+        assert "drill-down: use the original file path above" in result.content
+
+    def test_decorated_class_and_method_are_extracted(self, tmp_path):
+        source = tmp_path / "decorated.py"
+        source.write_text(
+            "import functools\n"
+            "\n"
+            "@requires(backend=\"torch\")\n"
+            "class Trainer:\n"
+            "    @classmethod\n"
+            "    def build(cls):\n"
+            "        pass\n"
+            "\n"
+            "@functools.lru_cache\n"
+            "def helper():\n"
+            "    return 1\n"
+        )
+
+        result = structural_read(source, small_file_threshold=1)
+
+        assert result.mode == "structural"
+        assert '@requires(backend="torch")' in result.content
+        assert "class Trainer  [L4-L7]" in result.content
+        assert "def build(cls)  [L6-L7]" in result.content
+        assert "def helper()  [L10-L11]" in result.content
+
     def test_typescript_structural(self):
         result = structural_read(FIXTURES / "sample.ts", small_file_threshold=50)
         assert result.mode == "structural"
@@ -31,6 +69,8 @@ class TestStructuralRead:
         assert "validateEmail" in result.content
 
     def test_rust_structural(self):
+        if importlib.util.find_spec("tree_sitter_rust") is None:
+            pytest.skip("tree_sitter_rust is optional and not installed in this environment")
         result = structural_read(FIXTURES / "sample.rs", small_file_threshold=50)
         assert result.mode == "structural"
         assert "InMemoryRepo" in result.content or "hash_password" in result.content

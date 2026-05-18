@@ -34,10 +34,24 @@ def _report(command: str, raw_output: str, skim_output: str, mode: str) -> None:
     )
 
 
+def _prefer_smaller_output(raw_output: str, skim_output: str, mode: str) -> tuple[str, str]:
+    """Avoid recording or showing a compressed result that is larger than raw output."""
+
+    if mode != "compress":
+        return skim_output, mode
+
+    from skim.session import estimate_tokens
+
+    raw_tokens = estimate_tokens(raw_output)
+    skim_tokens = estimate_tokens(skim_output)
+    if skim_tokens >= raw_tokens:
+        return raw_output, "full"
+    return skim_output, mode
+
+
 def cmd_read(args) -> None:
-    """Smart file read with AST structural summary + session dedup."""
+    """Smart file read with AST structural summary."""
     from skim.ast_engine import structural_read, read_symbol
-    from skim.session import SessionManager
 
     raw_path = args.path
     symbol_name = None
@@ -63,19 +77,10 @@ def cmd_read(args) -> None:
     else:
         result = structural_read(path)
 
-    session = SessionManager()
-    cache_key = f"read:{path.resolve()}"
-
-    if symbol_name:
-        cache_key += f":{symbol_name}"
-
-    output, tokens_saved = session.check(cache_key, result.content)
-
-    mode = "dedup" if tokens_saved > 0 else result.mode
     raw_content = path.read_text(encoding="utf-8", errors="replace")
-    _report(f"read {raw_path}", raw_content, output, mode)
+    _report(f"read {raw_path}", raw_content, result.content, result.mode)
 
-    print(output)
+    print(result.content)
 
 
 def cmd_gain(args) -> None:
@@ -92,7 +97,7 @@ def cmd_gain(args) -> None:
         print("skim: analytics data reset")
         return
 
-    summary = tracker.gain_summary(days=args.days)
+    summary = tracker.gain_summary(days=args.days, session_log_path=args.session_log)
 
     if args.json:
         import json
@@ -135,21 +140,15 @@ def cmd_session(args) -> None:
 
 
 def cmd_git(args) -> None:
-    """Compressed git commands with session dedup."""
+    """Compressed git commands."""
     from skim.filters.git import run_git
-    from skim.session import SessionManager
 
     if not args.git_args:
         subprocess.run(["git"], check=False)
         return
 
     raw_output, filtered_output = run_git(args.git_args)
-
-    session = SessionManager()
-    cache_key = f"git:{' '.join(args.git_args)}"
-    output, tokens_saved = session.check(cache_key, filtered_output)
-
-    mode = "dedup" if tokens_saved > 0 else "compress"
+    output, mode = _prefer_smaller_output(raw_output, filtered_output, "compress")
     _report(f"git {' '.join(args.git_args)}", raw_output, output, mode)
 
     print(output)
@@ -163,26 +162,21 @@ def cmd_grep(args) -> None:
         return
 
     raw_output, filtered = run_command_filtered(["grep"] + list(args.grep_args))
-    _report(f"grep {' '.join(args.grep_args)}", raw_output, filtered, "compress")
+    output, mode = _prefer_smaller_output(raw_output, filtered, "compress")
+    _report(f"grep {' '.join(args.grep_args)}", raw_output, output, mode)
 
-    print(filtered)
+    print(output)
 
 
 def cmd_test(args) -> None:
     """Compressed test runner output."""
     from skim.filters.test_runners import run_test
-    from skim.session import SessionManager
 
     if not args.test_args:
         return
 
     raw_output, filtered = run_test(args.test_args)
-
-    session = SessionManager()
-    cache_key = f"test:{' '.join(args.test_args)}"
-    output, tokens_saved = session.check(cache_key, filtered)
-
-    mode = "dedup" if tokens_saved > 0 else "compress"
+    output, mode = _prefer_smaller_output(raw_output, filtered, "compress")
     _report(f"test {' '.join(args.test_args)}", raw_output, output, mode)
 
     print(output)

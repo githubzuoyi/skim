@@ -14,6 +14,8 @@ from pathlib import Path
 from skim.hooks.constants import (
     CLAUDE_HOOK,
     CLAUDE_MD_PATCH,
+    COPILOT_LAUNCHER_FILENAME,
+    COPILOT_LAUNCHER_SH,
     COPILOT_HOOK_JSON,
     COPILOT_INSTRUCTIONS,
     CURSOR_HOOK_CONFIG,
@@ -294,9 +296,16 @@ def _show_status(agent: str) -> None:
 
     elif agent == "copilot":
         hook_path = Path.cwd() / ".github" / "hooks" / "skim-rewrite.json"
-        inst_path = Path.cwd() / ".github" / "copilot-instructions.md"
+        inst_path = Path.cwd() / ".github" / "instructions" / "copilot-instructions.md"
         if hook_path.exists():
             print(f"  ✓ Hook config installed at {hook_path}")
+            try:
+                hook_config = json.loads(hook_path.read_text())
+                hook_cmd = hook_config["hooks"]["PreToolUse"][0].get("command", "")
+                if hook_cmd:
+                    print(f"    Command: {hook_cmd}")
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+                pass
         else:
             print(f"  ✗ No hook config found (expected {hook_path})")
         if inst_path.exists():
@@ -378,26 +387,34 @@ def init_copilot() -> None:
 
     Creates:
     - .github/hooks/skim-rewrite.json — PreToolUse hook config
-    - .github/copilot-instructions.md — AI instructions for skim usage
+    - .github/instructions/copilot-instructions.md — AI instructions for skim usage
     """
     from skim.style import CHECK, BOLD, DIM, RESET, GREEN
 
     github_dir = Path.cwd() / ".github"
     hooks_dir = github_dir / "hooks"
+    instructions_dir = github_dir / "instructions"
     hooks_dir.mkdir(parents=True, exist_ok=True)
+    instructions_dir.mkdir(parents=True, exist_ok=True)
 
     hook_path = hooks_dir / "skim-rewrite.json"
     hook_path.write_text(json.dumps(COPILOT_HOOK_JSON, indent=2) + "\n")
     print(f"  {CHECK} Installed Copilot hook {DIM}→{RESET} {hook_path}")
 
-    instructions_path = github_dir / "copilot-instructions.md"
+    launcher_path = hooks_dir / COPILOT_LAUNCHER_FILENAME
+    launcher_path.write_text(COPILOT_LAUNCHER_SH)
+    launcher_path.chmod(0o755)
+    print(f"  {CHECK} Created Copilot launcher {DIM}→{RESET} {launcher_path}")
+
+    instructions_path = instructions_dir / "copilot-instructions.md"
     instructions_path.write_text(COPILOT_INSTRUCTIONS)
     print(f"  {CHECK} Created Copilot instructions {DIM}→{RESET} {instructions_path}")
 
     _write_skill_file()
 
     print()
-    print(f"  {GREEN}Done!{RESET} Restart VS Code / Copilot CLI to activate.")
+    print(f"  {GREEN}Done!{RESET} Start a new Copilot chat session to pick up skim.")
+    print(f"  Reload VS Code only if you just installed the hook for the first time.")
     print(f"  Run {BOLD}skim gain{RESET} anytime to see token savings.")
     print()
     print(f"  {DIM}Works with VS Code Copilot Chat (transparent rewrite)")

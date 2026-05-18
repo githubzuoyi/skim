@@ -2,6 +2,53 @@
 
 from __future__ import annotations
 
+
+COPILOT_LAUNCHER_FILENAME = "skim-launcher.sh"
+COPILOT_LAUNCHER_COMMAND = f"/bin/sh ./.github/hooks/{COPILOT_LAUNCHER_FILENAME} copilot"
+
+COPILOT_LAUNCHER_SH = """#!/bin/sh
+set -eu
+
+agent="${1:-copilot}"
+
+if [ -n "${SKIM_BIN:-}" ] && [ -x "${SKIM_BIN}" ]; then
+    exec "${SKIM_BIN}" hook "${agent}"
+fi
+
+if command -v skim >/dev/null 2>&1; then
+    exec skim hook "${agent}"
+fi
+
+if [ -n "${SKIM_PYTHON:-}" ] && command -v "${SKIM_PYTHON}" >/dev/null 2>&1; then
+    if "${SKIM_PYTHON}" -c 'import skim' >/dev/null 2>&1; then
+        exec "${SKIM_PYTHON}" -m skim hook "${agent}"
+    fi
+fi
+
+for python_cmd in python3 python; do
+    if command -v "${python_cmd}" >/dev/null 2>&1; then
+        if "${python_cmd}" -c 'import skim' >/dev/null 2>&1; then
+            exec "${python_cmd}" -m skim hook "${agent}"
+        fi
+    fi
+done
+
+for candidate in \
+    "${HOME}/.local/bin/skim" \
+    "${HOME}/miniforge3/bin/skim" \
+    "${HOME}/miniconda3/bin/skim" \
+    "${HOME}/anaconda3/bin/skim" \
+    "${HOME}/.pyenv/shims/skim"
+do
+    if [ -x "${candidate}" ]; then
+        exec "${candidate}" hook "${agent}"
+    fi
+done
+
+echo "skim hook launcher: unable to find skim. Install skim or set SKIM_BIN / SKIM_PYTHON." >&2
+exit 127
+"""
+
 # Claude Code hook JSON structure (PreToolUse)
 CLAUDE_HOOK = {
     "matcher": "Bash",
@@ -31,7 +78,7 @@ COPILOT_HOOK_JSON = {
         "PreToolUse": [
             {
                 "type": "command",
-                "command": "skim hook copilot",
+                "command": COPILOT_LAUNCHER_COMMAND,
                 "cwd": ".",
                 "timeout": 5,
             }
@@ -68,6 +115,7 @@ class AuthService
     def verify_token(self, token: str) -> dict
 
 // [487 lines → 15 lines · 97% reduction]
+// [skim tokens ~3,084 -> ~182, saved ~2,902 (94%)]
 // [skim read src/auth/service.py:<symbol> for full function]
 ```
 
@@ -121,8 +169,8 @@ instead of raw content. Use the following commands:
 
 ### Tips
 - Use structural summaries first, then request specific symbols
-- skim automatically deduplicates: re-reading unchanged files returns "[unchanged]"
-- Run `skim gain` to see token savings statistics
+- Structural summaries now show approximate original/current/saved token counts inline
+- Run `skim gain` to see cumulative token savings statistics
 """
 
 # Content to patch into CLAUDE.md

@@ -11,6 +11,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
+from skim.pricing import estimate_input_cost, format_usd, resolve_pricing_model, savings_pct
+from skim.session import estimate_tokens
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -314,7 +317,7 @@ def read_symbol(path: Path, symbol_name: str) -> SkimResult:
             if method_name:
                 for child in sym.children:
                     if child.name == method_name:
-                        body = "\n".join(lines[child.start_line : child.end_line + 1])
+                        body = "\n".join(lines[child.start_line - 1 : child.end_line])
                         return SkimResult(
                             content=body, mode="symbol",
                             original_lines=len(lines),
@@ -325,7 +328,7 @@ def read_symbol(path: Path, symbol_name: str) -> SkimResult:
                     mode="symbol", original_lines=len(lines),
                 )
             else:
-                body = "\n".join(lines[sym.start_line : sym.end_line + 1])
+                body = "\n".join(lines[sym.start_line - 1 : sym.end_line])
                 return SkimResult(
                     content=body, mode="symbol",
                     original_lines=len(lines),
@@ -357,6 +360,7 @@ def _extract_symbols(
 
     for node in root.children:
         exported = False
+        wrapper_decorators: list[str] = []
 
         actual_node = node
         if node.type in config.export_patterns:
@@ -376,10 +380,19 @@ def _extract_symbols(
         if node.type in config.decorator_types:
             continue
 
-        look_node = actual_node
+        actual_node, wrapper_decorators = _unwrap_decorated_symbol(
+            actual_node,
+            config,
+            source,
+        )
+        if actual_node is None:
+            continue
+
+        decorators.extend(wrapper_decorators)
+
         dec_idx = _find_decorators_before(root, node, config)
         if dec_idx:
-            decorators = dec_idx
+            decorators.extend(dec for dec in dec_idx if dec not in decorators)
 
         if actual_node.type in config.function_types:
             sym = _extract_function_symbol(actual_node, config, source, lines)
@@ -419,8 +432,8 @@ def _extract_function_symbol(
         name=name,
         kind="function",
         signature=sig,
-        start_line=node.start_point[0],
-        end_line=node.end_point[0],
+        start_line=node.start_point[0] + 1,
+        end_line=node.end_point[0] + 1,
     )
 
 
@@ -440,18 +453,20 @@ def _extract_class_symbol(
     body = node.child_by_field_name(config.body_field)
     if body:
         for child in body.children:
-            if child.type in config.function_types:
-                method = _extract_function_symbol(child, config, source, lines)
+            method_node, method_decorators = _unwrap_decorated_symbol(child, config, source)
+            if method_node and method_node.type in config.function_types:
+                method = _extract_function_symbol(method_node, config, source, lines)
                 if method:
                     method.kind = "method"
+                    method.decorators = method_decorators
                     children.append(method)
 
     return SymbolInfo(
         name=name,
         kind=kind,
         signature=sig,
-        start_line=node.start_point[0],
-        end_line=node.end_point[0],
+        start_line=node.start_point[0] + 1,
+        end_line=node.end_point[0] + 1,
         children=children,
     )
 
@@ -499,8 +514,8 @@ def _extract_extra_symbol(
         name=name,
         kind=kind,
         signature=sig,
-        start_line=node.start_point[0],
-        end_line=node.end_point[0],
+        start_line=node.start_point[0] + 1,
+        end_line=node.end_point[0] + 1,
     )
 
 
@@ -535,14 +550,14 @@ def _get_export_signature(node, source: bytes, lines: list[str]) -> SymbolInfo |
                 kind = "export"
             return SymbolInfo(
                 name=name, kind=kind, signature=first_line,
-                start_line=node.start_point[0], end_line=node.end_point[0],
+                start_line=node.start_point[0] + 1, end_line=node.end_point[0] + 1,
             )
 
     if "=" in first_line or "type " in first_line:
         name = first_line.split("=")[0].replace("export", "").replace("const", "").replace("type", "").strip()
         return SymbolInfo(
             name=name, kind="export", signature=first_line,
-            start_line=node.start_point[0], end_line=node.end_point[0],
+            start_line=node.start_point[0] + 1, end_line=node.end_point[0] + 1,
         )
     return None
 
@@ -568,6 +583,24 @@ def _find_decorators_before(root, target_node, config: LanguageConfig) -> list[s
     return decorators
 
 
+def _unwrap_decorated_symbol(node, config: LanguageConfig, source: bytes):
+    """Unwrap tree-sitter decorated_definition nodes to their real symbol."""
+    decorators: list[str] = []
+    current = node
+
+    while current is not None and current.type == "decorated_definition":
+        inner = None
+        for child in current.children:
+            if child.type in config.decorator_types:
+                decorators.append(_node_text(child, source).strip())
+            elif child.type in config.function_types | config.class_types | config.extra_symbol_types:
+                inner = child
+                break
+        current = inner
+
+    return current, decorators
+
+
 # ---------------------------------------------------------------------------
 # Internal: import extraction
 # ---------------------------------------------------------------------------
@@ -585,6 +618,12 @@ def _extract_imports(root, config: LanguageConfig, source: bytes) -> list[str]:
 # ---------------------------------------------------------------------------
 # Internal: formatting
 # ---------------------------------------------------------------------------
+
+def _format_line_span(symbol: SymbolInfo) -> str:
+    """Format a symbol's original-file line span for drill-down navigation."""
+    if symbol.start_line == symbol.end_line:
+        return f"[L{symbol.start_line}]"
+    return f"[L{symbol.start_line}-L{symbol.end_line}]"
 
 def _format_structural_summary(
     path: Path,
@@ -635,40 +674,75 @@ def _format_structural_summary(
         if sym.is_exported:
             prefix = "export "
 
+        line_span = _format_line_span(sym)
+
         if sym.kind in ("class", "interface"):
             if tty:
-                parts.append(f"{BOLD}{WHITE}{prefix}{sym.signature}{RESET}")
+                parts.append(
+                    f"{BOLD}{WHITE}{prefix}{sym.signature}{RESET} "
+                    f"{DIM}{line_span}{RESET}"
+                )
                 for method in sym.children:
-                    parts.append(f"  {CYAN}{method.signature}{RESET}")
+                    method_span = _format_line_span(method)
+                    parts.append(
+                        f"  {CYAN}{method.signature}{RESET} "
+                        f"{DIM}{method_span}{RESET}"
+                    )
                 if sym.children:
-                    line_span = sym.end_line - sym.start_line + 1
-                    parts.append(f"  {DIM}// ... {line_span} lines total{RESET}")
+                    total_line_span = sym.end_line - sym.start_line + 1
+                    parts.append(f"  {DIM}// ... {total_line_span} lines total{RESET}")
             else:
-                parts.append(f"{prefix}{sym.signature}")
+                parts.append(f"{prefix}{sym.signature}  {line_span}")
                 for method in sym.children:
-                    parts.append(f"  {method.signature}")
+                    method_span = _format_line_span(method)
+                    parts.append(f"  {method.signature}  {method_span}")
                 if sym.children:
-                    line_span = sym.end_line - sym.start_line + 1
-                    parts.append(f"  // ... {line_span} lines total")
+                    total_line_span = sym.end_line - sym.start_line + 1
+                    parts.append(f"  // ... {total_line_span} lines total")
         else:
             if tty:
-                parts.append(f"{WHITE}{prefix}{sym.signature}{RESET}")
+                parts.append(
+                    f"{WHITE}{prefix}{sym.signature}{RESET} "
+                    f"{DIM}{line_span}{RESET}"
+                )
             else:
-                parts.append(f"{prefix}{sym.signature}")
+                parts.append(f"{prefix}{sym.signature}  {line_span}")
 
     # Footer
     summary_lines = len(parts) + 2
     pct = _savings_pct(len(lines), summary_lines)
+    reduction_line = f"// [{len(lines)} lines -> {summary_lines} lines ({pct} reduction)]"
+    drilldown_line = (
+        "// [drill-down: use the original file path above with the Lx-Ly "
+        "tags for exact read_file ranges]"
+    )
+    symbol_line = f"// [skim read {path}:<symbol> for full function]"
+
+    original_text = "\n".join(lines)
+    savings_line = _inline_savings_line(
+        original_text,
+        "\n".join(parts + ["", reduction_line, drilldown_line, symbol_line]),
+    )
+
     parts.append("")
     if tty:
         parts.append(
             f"{DIM}// [{len(lines)} lines → {summary_lines} lines "
             f"({GREEN}{pct} reduction{DIM})]{RESET}"
         )
+        if savings_line:
+            parts.append(f"{DIM}{savings_line}{RESET}")
+        parts.append(
+            f"{DIM}// [drill-down: use the original file path above with the "
+            f"Lx-Ly tags for exact read_file ranges]{RESET}"
+        )
         parts.append(f"{DIM}// [skim read {path}:<symbol> for full function]{RESET}")
     else:
-        parts.append(f"// [{len(lines)} lines -> {summary_lines} lines ({pct} reduction)]")
-        parts.append(f"// [skim read {path}:<symbol> for full function]")
+        parts.append(reduction_line)
+        if savings_line:
+            parts.append(savings_line)
+        parts.append(drilldown_line)
+        parts.append(symbol_line)
 
     return "\n".join(parts)
 
@@ -721,6 +795,25 @@ def _savings_pct(original: int, summary: int) -> str:
     return f"{pct}%"
 
 
+def _inline_savings_line(original_text: str, skim_text: str) -> str:
+    """Describe prompt-side savings in a form the agent can surface to users."""
+
+    input_tokens = estimate_tokens(original_text)
+    output_tokens = estimate_tokens(skim_text)
+    saved = input_tokens - output_tokens
+    if saved <= 0:
+        return ""
+
+    pricing = resolve_pricing_model()
+    pct = savings_pct(input_tokens, output_tokens)
+    cost = estimate_input_cost(saved, pricing.key)
+    return (
+        f"// [skim tokens ~{input_tokens:,} -> ~{output_tokens:,}, "
+        f"saved ~{saved:,} ({pct}%), est. {pricing.display_name} input cost "
+        f"{format_usd(cost)}]"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fallback: head + tail for unsupported languages
 # ---------------------------------------------------------------------------
@@ -747,6 +840,9 @@ def _head_tail_fallback(
         "",
         *lines[-tail:],
     ]
+    savings_line = _inline_savings_line(content, "\n".join(parts))
+    if savings_line:
+        parts.extend(["", savings_line])
     summary = "\n".join(parts)
     return SkimResult(
         content=summary,

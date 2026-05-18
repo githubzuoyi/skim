@@ -15,6 +15,8 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
 
+from skim.pricing import savings_pct
+
 
 # ---------------------------------------------------------------------------
 # Token estimation (matches rtk's ceil(byte_length / 4) approach)
@@ -88,7 +90,10 @@ class SessionManager:
                 entry.hit_count += 1
                 entry.last_seen = now
                 current_tokens = estimate_tokens(current_content)
-                unchanged_msg = f"[unchanged since {_fmt_relative_time(now - entry.first_seen)}]"
+                unchanged_msg = _format_unchanged_marker(
+                    now - entry.first_seen,
+                    current_tokens,
+                )
                 saved = current_tokens - estimate_tokens(unchanged_msg)
                 if saved <= 0:
                     # Content is smaller than the unchanged marker — not worth deduplicating
@@ -186,6 +191,25 @@ def _compute_delta(old_hash: str, new_content: str, key: str) -> str:
         return f"[changed] {key}\n{new_content}"
 
     return f"[changed] {key} ({len(lines)} lines)\n{new_content}"
+
+
+def _format_unchanged_marker(age_seconds: float, current_tokens: int) -> str:
+    """Keep dedup markers compact while still surfacing saved-token impact."""
+
+    relative = _fmt_relative_time(age_seconds)
+    marker = f"[unchanged since {relative}]"
+
+    for _ in range(2):
+        marker_tokens = estimate_tokens(marker)
+        saved = current_tokens - marker_tokens
+        if saved <= 0:
+            return marker
+        marker = (
+            f"[unchanged since {relative} | skim ~{saved:,} input tokens saved / "
+            f"{savings_pct(current_tokens, marker_tokens)}%]"
+        )
+
+    return marker
 
 
 def _fmt_relative_time(seconds: float) -> str:

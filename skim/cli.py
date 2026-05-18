@@ -50,6 +50,10 @@ def _build_parser() -> argparse.ArgumentParser:
     gain_p.add_argument("--json", action="store_true", help="JSON output")
     gain_p.add_argument("--days", type=int, default=30, help="Number of days (default: 30)")
     gain_p.add_argument("--reset", action="store_true", help="Reset analytics data")
+    gain_p.add_argument(
+        "--session-log",
+        help="Copilot session main.jsonl or session directory for latest-session comparison",
+    )
 
     # skim session [clear]
     sess_p = sub.add_parser("session", help="Show or manage current session")
