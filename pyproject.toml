@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skimcode"
-version = "0.1.0"
+version = "0.2.0"
 description = "AST-aware token optimizer for AI coding agents. 80-97% fewer tokens on file reads."
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -46,9 +46,9 @@ dev = [
 skim = "skim.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/skim-ai/skim"
-Repository = "https://github.com/skim-ai/skim"
-Issues = "https://github.com/skim-ai/skim/issues"
+Homepage = "https://github.com/githubzuoyi/skim"
+Repository = "https://github.com/githubzuoyi/skim"
+Issues = "https://github.com/githubzuoyi/skim/issues"
 
 [tool.setuptools]
 packages = ["skim", "skim.hooks", "skim.filters"]

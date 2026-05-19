@@ -33,6 +33,10 @@ class TestInitCopilot:
         assert hook_json == COPILOT_HOOK_JSON
         assert hook_json["hooks"]["PreToolUse"][0]["command"] == COPILOT_LAUNCHER_COMMAND
         assert launcher_path.read_text() == COPILOT_LAUNCHER_SH
+        assert 'repo_root=$(CDPATH= cd -- "${script_dir}/../.." && pwd)' in COPILOT_LAUNCHER_SH
+        assert "${VIRTUAL_ENV}/bin/skim" in COPILOT_LAUNCHER_SH
+        assert "${repo_root}/skim/.venv/bin/skim" in COPILOT_LAUNCHER_SH
+        assert 'find_spec("skim.__main__")' in COPILOT_LAUNCHER_SH
         assert launcher_path.stat().st_mode & 0o111
         assert instructions_path.read_text() == COPILOT_INSTRUCTIONS
         assert not legacy_path.exists()

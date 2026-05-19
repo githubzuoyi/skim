@@ -1,20 +1,31 @@
 # skim
 
-**Stop reading every line. Start skimming. 80-97% fewer tokens on file reads.**
+**Stop dumping files into the model. Start routing context intentionally.**
 
 [![PyPI version](https://img.shields.io/pypi/v/skimcode.svg)](https://pypi.org/project/skimcode/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-skim is an AST-aware token optimizer for AI coding agents. It intercepts file reads and command output, returning **structural summaries** instead of raw content — saving 80-97% of tokens on every operation.
+skim is a token-optimization layer for AI coding agents. It rewrites expensive file reads into structural summaries, compresses noisy command output, and records how much prompt budget was actually saved.
 
-Works with **Claude Code**, **Cursor**, **Copilot**, **Codex**, **Gemini CLI**, **Windsurf**, and **Cline**.
+It currently supports **Claude Code**, **Cursor**, **GitHub Copilot**, **Codex**, **Gemini CLI**, **Windsurf**, and **Cline**.
+
+---
+
+## What skim Actually Does
+
+skim is not just an AST reader. It has four separate layers:
+
+1. **Read routing** — large source files become structural summaries instead of raw dumps.
+2. **Command compression** — `git`, `grep`, and test output get filtered into compact task-oriented views.
+3. **Hook integration** — agent tool calls can be transparently rewritten before they hit the model.
+4. **Telemetry** — `skim gain` tracks input, output, saved tokens, and Copilot session share.
 
 ---
 
 ## Before vs After
 
-### Without skim — raw file dump (487 lines, ~4,000 tokens)
+### Without skim
 
 ```python
 $ cat src/auth/service.py
@@ -43,53 +54,37 @@ class AuthService:
         self._secret = secret
 
     async def login(self, email: str, password: str) -> AuthResult:
-        user = await self._repo.find_by_email(email)
-        if not user:
-            return AuthResult(success=False, error="User not found")
-        if not self._verify_password(password, user.password_hash):
-            return AuthResult(success=False, error="Invalid password")
-        token = self._generate_token(user.id)
-        await self._repo.save_session(Session(user_id=user.id, token=token))
-        return AuthResult(success=True, token=token)
-
-    # ... 450 more lines: logout, verify_token, refresh, reset_password,
-    #     _hash_password, _verify_password, _generate_token, validate_email,
-    #     rate_limit, session_cleanup, admin_revoke_all, ...
+        ...
 ```
 
-The AI agent consumes **all 487 lines** just to understand what this file does.
+The model pays for the whole file just to discover the names of a few classes and methods.
 
-### With skim — structural summary (15 lines, ~120 tokens)
+### With skim
 
 ```python
 $ skim read src/auth/service.py
 
-# src/auth/service.py  487 lines  4 exports  12 symbols
-# imports: hashlib, secrets, datetime, dataclasses, typing, .database, .models, .exceptions
+// src/auth/service.py  487 lines  12 symbols
+// imports: hashlib, secrets, datetime, dataclasses, typing, .database, .models, .exceptions
 
-class AuthResult
+class AuthResult  [L12-L16]
     success: bool
     token: Optional[str]
     error: Optional[str]
-class AuthService
-    def __init__(self, repo: UserRepository, secret: str)
-    async def login(self, email: str, password: str) -> AuthResult
-    async def logout(self, session_id: str) -> None
-    def verify_token(self, token: str) -> dict
-    def refresh(self, token: str) -> AuthResult
-    async def reset_password(self, email: str) -> None
-    def _hash_password(self, password: str) -> str
-    def _verify_password(self, password: str, hash: str) -> bool
-    def _generate_token(self, user_id: int) -> str
-    def validate_email(self, email: str) -> bool
+class AuthService  [L19-L143]
+    def __init__(self, repo: UserRepository, secret: str)  [L20-L22]
+    async def login(self, email: str, password: str) -> AuthResult  [L24-L32]
+    async def logout(self, session_id: str) -> None  [L34-L41]
+    def verify_token(self, token: str) -> dict  [L43-L57]
 
-# [487 lines → 15 lines · 97% reduction]
-# [skim read src/auth/service.py:<symbol> for full function]
+// [487 lines -> 15 lines (97% reduction)]
+// [skim tokens ~4,000 -> ~120, saved ~3,880 (97%)]
+// [skim read src/auth/service.py:<symbol> for full function]
 ```
 
-**97% fewer tokens.** The agent sees the full architecture — every function, every type, every import — without reading a single function body.
+skim keeps the architectural signal, line spans, and drill-down path, while dropping bodies that the model does not need yet.
 
-### Need the implementation? Drill in.
+### Drill into a single symbol
 
 ```python
 $ skim read src/auth/service.py:AuthService.login
@@ -98,140 +93,200 @@ $ skim read src/auth/service.py:AuthService.login
         user = await self._repo.find_by_email(email)
         if not user:
             return AuthResult(success=False, error="User not found")
-        if not self._verify_password(password, user.password_hash):
-            return AuthResult(success=False, error="Invalid password")
-        token = self._generate_token(user.id)
-        await self._repo.save_session(Session(user_id=user.id, token=token))
-        return AuthResult(success=True, token=token)
-```
-
-### Read the same file again? Zero cost.
-
-```
-$ skim read src/auth/service.py
-[unchanged since 3m ago]             → 4 tokens (99.9% savings)
+        ...
 ```
 
 ---
 
-## Token Savings
+## Installation
 
-| Operation | Standard | skim | Savings |
-|-----------|----------|------|---------|
-| Read 500-line TS file | ~4,000 tokens | ~120 tokens | **-97%** |
-| Re-read unchanged file | ~4,000 tokens | ~4 tokens | **-99%** |
-| `git status` (20 files) | ~800 tokens | ~100 tokens | **-87%** |
-| `git diff` (3 files) | ~2,000 tokens | ~400 tokens | **-80%** |
-| `pytest` (all pass) | ~1,500 tokens | ~20 tokens | **-99%** |
-| Read specific function | ~4,000 tokens | ~80 tokens | **-98%** |
+### Option 1: user-level install
+
+```bash
+git clone https://github.com/githubzuoyi/skim.git
+cd skim
+python3 -m pip install --user .
+skim --version
+```
+
+If `skim` is not on your `PATH`, use the Python entry point instead:
+
+```bash
+python3 -m skim --version
+```
+
+### Option 2: project-local venv
+
+This is the safest setup for teams that do not want a global install.
+
+```bash
+git clone https://github.com/githubzuoyi/skim.git
+cd skim
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install .
+python -m skim --version
+```
+
+### Option 3: repo-local dedicated skim checkout
+
+This layout is useful when you want skim to live alongside the target repo:
+
+```bash
+cd /path/to/your/code-repo
+git clone https://github.com/githubzuoyi/skim.git skim
+cd skim
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install .
+python -m skim --version
+```
+
+The Copilot launcher now auto-detects all of these layouts:
+
+- the active `VIRTUAL_ENV`
+- the target repo's `.venv` / `venv` / `env`
+- a repo-local dedicated skim checkout at `./skim/.venv`
 
 ---
 
-## Quick Install
+## Copilot Quick Start
+
+### Global or user install
 
 ```bash
-pip install skimcode
-skim init -g
+cd /path/to/your/code-repo
+skim init --agent copilot
+skim init --show --agent copilot
 ```
 
-That's it. Restart your AI tool. skim hooks into your agent's tool calls automatically.
-
-### Other install methods
+### Venv install
 
 ```bash
-# uv (recommended)
-uv tool install skimcode && skim init -g
-
-# pipx
-pipx install skimcode && skim init -g
-
-# With all language support (Rust, Go, Java, Ruby)
-pip install "skimcode[all]"
+cd /path/to/your/code-repo
+/path/to/skim/.venv/bin/python -m skim init --agent copilot
+/path/to/skim/.venv/bin/python -m skim init --show --agent copilot
 ```
 
-### One-line install
+Then:
+
+1. Start a new Copilot chat.
+2. Let Copilot use `read_file` normally.
+3. Run `skim gain` whenever you want to see savings.
+
+If `skim` is not on your `PATH`, prefer `python -m skim ...` from the environment that installed it.
+
+### Platform note
+
+Copilot hook installation currently targets **macOS, Linux, and WSL**. The generated launcher uses `/bin/sh`, so on native Windows PowerShell/CMD you can install and run skim manually, but Copilot hook support is not yet first-class there.
+
+---
+
+## Other Supported Agents
+
+| Agent | Integration type | Install command |
+|-------|------------------|-----------------|
+| Claude Code | global hook in `~/.claude/settings.json` | `skim init -g --agent claude` |
+| Cursor | global hook in `~/.cursor/hooks.json` | `skim init -g --agent cursor` |
+| GitHub Copilot | project hook in `.github/hooks` | `skim init --agent copilot` |
+| Codex | global hook in `~/.codex/settings.json` | `skim init -g --agent codex` |
+| Gemini CLI | shell alias install | `skim init -g --agent gemini` |
+| Windsurf | shell alias install | `skim init -g --agent windsurf` |
+| Cline | shell alias install | `skim init -g --agent cline` |
+
+Use `skim init --show --agent <agent>` to inspect the installed hook state.
+
+---
+
+## Commands
+
+### File reading
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/skim-ai/skim/main/install.sh | sh
+skim read <file>              # structural summary
+skim read <file>:<symbol>     # specific function/class
+skim read <file>:Class.method # specific method
+skim read <file> --full       # full file content
 ```
+
+### Command compression
+
+```bash
+skim git status
+skim git diff
+skim git log
+
+skim grep -R "TODO" src
+
+skim test pytest
+skim test cargo test
+skim test npm test
+```
+
+skim has specialized compressors for:
+
+- git status / diff / log
+- pytest / cargo test / npm test / go test
+- generic file-grouped command output such as grep or rg-like results
+
+If the filtered output is not actually smaller than the original, skim falls back to the raw output instead of pretending a compression win.
+
+### Analytics and session inspection
+
+```bash
+skim gain
+skim gain --daily
+skim gain --history
+skim gain --json
+skim gain --all-projects
+skim gain --session-log /path/to/main.jsonl
+
+skim session info
+skim session clear
+```
+
+`skim gain` currently shows:
+
+- per-mode input / output / saved tokens
+- total compression on tracked input
+- latest Copilot session share of non-cached input
+- GPT-5.4-based input cost estimates
+
+### Dashboard
+
+```bash
+skim server --host 0.0.0.0 --port 7745
+```
+
+This serves a local stats dashboard backed by skim's SQLite history.
 
 ---
 
 ## How It Works
 
 ```
-AI Agent (Claude/Cursor/etc)
-    │  "cat auth.ts"
+AI agent
+    │
+    ├── read_file / shell command
     ▼
-PreToolUse Hook
-    │  rewrites to: "skim read auth.ts"
+Hook layer
+    │  rewrites expensive reads or command calls
     ▼
 skim CLI
-    ├── Session Manager ──→ Cache hit? Return "[unchanged]"
-    │                        Cache miss ▼
-    ├── AST Engine (tree-sitter) ──→ Structural summary
-    │
-    └── Analytics Tracker ──→ SQLite (~/.local/share/skim/history.db)
+    ├── AST engine         -> structural summary with line spans
+    ├── command filters    -> git / grep / test output compression
+    ├── hook cache         -> reuse file summaries by stat/version
+    ├── tracker            -> record input/output/saved tokens
+    └── dashboard server   -> query and render local analytics
 ```
 
-1. **Hook intercepts** — `cat`, `head`, `git status` etc. get rewritten to `skim` equivalents
-2. **Session dedup** — If the file hasn't changed since last read, returns `[unchanged]`
-3. **AST parsing** — tree-sitter extracts function/class signatures without bodies
-4. **Savings tracked** — Every operation records tokens saved for `skim gain`
+In practice, skim does three distinct kinds of work:
 
----
-
-## Commands
-
-### File Reading
-
-```bash
-skim read <file>              # Structural summary (signatures only)
-skim read <file>:<symbol>     # Read specific function/class
-skim read <file>:Class.method # Read specific method
-skim read <file> --full       # Full file content
-```
-
-### Git Operations
-
-```bash
-skim git status    # Compact: "branch: main, modified (3): file1, file2, file3"
-skim git diff      # Compressed: keeps hunks, strips noise
-skim git log       # One-line format, last 20 commits
-```
-
-### Test Runners
-
-```bash
-skim test pytest           # Failures only + summary
-skim test cargo test       # Failures only + summary
-skim test npm test         # Failures only + summary
-```
-
-### Analytics
-
-```bash
-skim gain              # Token savings summary
-skim gain --daily      # Day-by-day breakdown
-skim gain --history    # Recent command history
-skim gain --json       # JSON output
-```
-
-### Session Management
-
-```bash
-skim session info      # Current session stats
-skim session clear     # Clear session cache
-```
-
-### Hook Management
-
-```bash
-skim init -g                    # Install hooks (default: Claude Code)
-skim init -g --agent cursor     # Install for Cursor
-skim init -g --show             # Show hook status
-skim init -g --uninstall        # Remove hooks
-```
+1. **Summarize code** before the model sees it.
+2. **Compress noisy execution output** into task-relevant views.
+3. **Measure what actually happened** so savings claims are inspectable later.
 
 ---
 
@@ -239,112 +294,28 @@ skim init -g --uninstall        # Remove hooks
 
 | Language | Extension | tree-sitter Module | Status |
 |----------|-----------|-------------------|--------|
-| Python | `.py` | `tree-sitter-python` | ✓ Built-in |
-| TypeScript | `.ts`, `.tsx` | `tree-sitter-typescript` | ✓ Built-in |
-| JavaScript | `.js`, `.jsx` | `tree-sitter-javascript` | ✓ Built-in |
-| Rust | `.rs` | `tree-sitter-rust` | ✓ Optional (`[all]`) |
-| Go | `.go` | `tree-sitter-go` | ✓ Optional (`[all]`) |
-| Java | `.java` | `tree-sitter-java` | ✓ Optional (`[all]`) |
-| Ruby | `.rb` | `tree-sitter-ruby` | ✓ Optional (`[all]`) |
-| C/C++ | `.c`, `.cpp`, `.h` | `tree-sitter-c/cpp` | ✓ Optional |
-| Swift | `.swift` | `tree-sitter-swift` | ✓ Optional |
-| Kotlin | `.kt` | `tree-sitter-kotlin` | ✓ Optional |
-| Other | `*` | — | Head+tail fallback |
-
----
-
-## Supported AI Agents
-
-| Agent | Hook Type | Install Command |
-|-------|-----------|-----------------|
-| Claude Code | `PreToolUse` (settings.json) | `skim init -g --agent claude` |
-| Cursor | `preToolUse` (hooks.json) | `skim init -g --agent cursor` |
-| Copilot | Coming soon | — |
-| Codex | Coming soon | — |
-| Gemini CLI | Coming soon | — |
-| Windsurf | Coming soon | — |
-| Cline | Coming soon | — |
-
----
-
-## Ecosystem: skim + rtk + graphify
-
-skim is part of a complementary ecosystem of AI coding optimization tools. Each operates at a different layer — **use them together** for maximum savings.
-
-```
-                        AI Coding Agent
-                    (Claude / Cursor / Codex)
-                              │
-            ┌─────────────────┼─────────────────┐
-            ▼                 ▼                 ▼
-     ┌─────────────┐  ┌─────────────┐  ┌──────────────┐
-     │  graphify   │  │    skim     │  │     rtk      │
-     │  ─────────  │  │  ─────────  │  │  ─────────   │
-     │  Understand │  │    Read     │  │   Execute    │
-     │  ─────────  │  │  ─────────  │  │  ─────────   │
-     │  Knowledge  │  │  AST-aware  │  │  Command     │
-     │  graph of   │  │  structural │  │  output      │
-     │  codebase   │  │  summaries  │  │  filtering   │
-     │  structure  │  │  + session  │  │              │
-     │             │  │  dedup      │  │              │
-     └──────┬──────┘  └──────┬──────┘  └──────┬───────┘
-            │                │                │
-     "What calls     "Show me the      "git status in
-      what? How       signatures,       3 lines, not
-      does auth       not 500 lines     50"
-      connect to      of code"
-      the DB?"
-```
-
-### How they compare
-
-|  | [**graphify**](https://github.com/safishamsi/graphify) | **skim** | [**rtk**](https://github.com/rtk-ai/rtk) |
-|--|---------|------|-----|
-| **Layer** | Understanding | Reading | Executing |
-| **What it does** | Builds a knowledge graph of codebase relationships (calls, imports, inheritance) | Returns function/class signatures instead of raw file content, deduplicates across session | Filters and compresses stdout of shell commands |
-| **Language** | Python + tree-sitter | Python + tree-sitter | Rust |
-| **Stateful?** | Yes (graph DB) | Yes (session cache) | No (stateless) |
-| **Best at** | "How does module X connect to Y?" | "Show me what's in this file" (80-97% fewer tokens) | "Run git status" (60-90% fewer tokens) |
-| **File read savings** | N/A (different purpose) | **80-97%** | 10-30% |
-| **Command savings** | N/A | 50-80% | **60-90%** |
-| **Hook mechanism** | MCP server | PreToolUse hook | PreToolUse hook |
-
-### Using them together
-
-```bash
-# graphify — understand architecture (once, at project start)
-graphify analyze .                     # builds knowledge graph
-graphify query "what calls login()"   # semantic queries
-
-# skim — efficient daily reading (every file read, every session)
-skim read src/auth.py                  # structural summary
-skim read src/auth.py:login            # just one function
-skim git status                        # compact status
-
-# rtk — compress everything else (every command)
-rtk cargo test                         # failures only
-rtk brew install node                  # skip noise
-```
-
-The ideal setup: **graphify** to map your codebase once, **skim** to read files efficiently, **rtk** to compress command output. Together they can reduce total agent token consumption by **70-90%**.
+| Python | `.py` | `tree-sitter-python` | built-in |
+| TypeScript | `.ts`, `.tsx` | `tree-sitter-typescript` | built-in |
+| JavaScript | `.js`, `.jsx` | `tree-sitter-javascript` | built-in |
+| Rust | `.rs` | `tree-sitter-rust` | optional via `[all]` |
+| Go | `.go` | `tree-sitter-go` | optional via `[all]` |
+| Java | `.java` | `tree-sitter-java` | optional via `[all]` |
+| Ruby | `.rb` | `tree-sitter-ruby` | optional via `[all]` |
+| Other | `*` | — | fallback summary |
 
 ---
 
 ## Configuration
 
-`~/.config/skim/config.toml`:
+skim reads `~/.config/skim/config.toml`.
 
 ```toml
 [hooks]
 exclude_commands = ["curl", "wget"]
 
 [read]
-small_file_threshold = 150    # Lines; below this, return full content
+small_file_threshold = 150
 structural_summary = true
-
-[session]
-enabled = true
-expiry_minutes = 30
 
 [tracking]
 enabled = true
@@ -352,6 +323,10 @@ history_days = 90
 
 [display]
 show_savings_hint = true
+
+[server]
+host = "0.0.0.0"
+port = 7745
 ```
 
 ---

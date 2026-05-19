@@ -10,6 +10,27 @@ COPILOT_LAUNCHER_SH = """#!/bin/sh
 set -eu
 
 agent="${1:-copilot}"
+script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+repo_root=$(CDPATH= cd -- "${script_dir}/../.." && pwd)
+
+has_skim_main() {
+    python_cmd="$1"
+    "$python_cmd" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("skim.__main__") else 1)' >/dev/null 2>&1
+}
+
+run_skim_bin() {
+    skim_bin="$1"
+    if [ -x "$skim_bin" ]; then
+        exec "$skim_bin" hook "$agent"
+    fi
+}
+
+run_skim_python() {
+    python_cmd="$1"
+    if command -v "$python_cmd" >/dev/null 2>&1 && has_skim_main "$python_cmd"; then
+        exec "$python_cmd" -m skim hook "$agent"
+    fi
+}
 
 if [ -n "${SKIM_BIN:-}" ] && [ -x "${SKIM_BIN}" ]; then
     exec "${SKIM_BIN}" hook "${agent}"
@@ -19,18 +40,37 @@ if command -v skim >/dev/null 2>&1; then
     exec skim hook "${agent}"
 fi
 
-if [ -n "${SKIM_PYTHON:-}" ] && command -v "${SKIM_PYTHON}" >/dev/null 2>&1; then
-    if "${SKIM_PYTHON}" -c 'import skim' >/dev/null 2>&1; then
-        exec "${SKIM_PYTHON}" -m skim hook "${agent}"
-    fi
+if [ -n "${VIRTUAL_ENV:-}" ]; then
+    run_skim_bin "${VIRTUAL_ENV}/bin/skim"
+    run_skim_python "${VIRTUAL_ENV}/bin/python"
 fi
 
-for python_cmd in python3 python; do
-    if command -v "${python_cmd}" >/dev/null 2>&1; then
-        if "${python_cmd}" -c 'import skim' >/dev/null 2>&1; then
-            exec "${python_cmd}" -m skim hook "${agent}"
-        fi
+for candidate in \
+    "${repo_root}/.venv/bin/skim" \
+    "${repo_root}/venv/bin/skim" \
+    "${repo_root}/env/bin/skim" \
+    "${repo_root}/skim/.venv/bin/skim" \
+    "${repo_root}/skim/venv/bin/skim" \
+    "${repo_root}/skim/env/bin/skim"
+do
+    run_skim_bin "$candidate"
+done
+
+for python_cmd in \
+    "${repo_root}/.venv/bin/python" \
+    "${repo_root}/venv/bin/python" \
+    "${repo_root}/env/bin/python" \
+    "${repo_root}/skim/.venv/bin/python" \
+    "${repo_root}/skim/venv/bin/python" \
+    "${repo_root}/skim/env/bin/python"
+do
+    if [ -x "$python_cmd" ]; then
+        run_skim_python "$python_cmd"
     fi
+done
+
+if [ -n "${SKIM_PYTHON:-}" ]; then
+    run_skim_python "${SKIM_PYTHON}"
 done
 
 for candidate in \
@@ -40,12 +80,14 @@ for candidate in \
     "${HOME}/anaconda3/bin/skim" \
     "${HOME}/.pyenv/shims/skim"
 do
-    if [ -x "${candidate}" ]; then
-        exec "${candidate}" hook "${agent}"
-    fi
+    run_skim_bin "$candidate"
 done
 
-echo "skim hook launcher: unable to find skim. Install skim or set SKIM_BIN / SKIM_PYTHON." >&2
+for python_cmd in python3 python; do
+    run_skim_python "$python_cmd"
+done
+
+echo "skim hook launcher: unable to find a runnable skim in PATH or venv. Set SKIM_BIN / SKIM_PYTHON or install skim into the active environment." >&2
 exit 127
 """
 
