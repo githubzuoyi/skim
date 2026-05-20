@@ -46,9 +46,9 @@ dev = [
 skim = "skim.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/githubzuoyi/skim"
-Repository = "https://github.com/githubzuoyi/skim"
-Issues = "https://github.com/githubzuoyi/skim/issues"
+Homepage = "https://github.com/ericzuo-ai/skim"
+Repository = "https://github.com/ericzuo-ai/skim"
+Issues = "https://github.com/ericzuo-ai/skim/issues"
 
 [tool.setuptools]
 packages = ["skim", "skim.hooks", "skim.filters"]

@@ -99,7 +99,7 @@ $ skim read src/auth/service.py:AuthService.login
 ### Option 1: user-level install
 
 ```bash
-git clone https://github.com/githubzuoyi/skim.git
+git clone https://github.com/ericzuo-ai/skim.git
 cd skim
 python3 -m pip install --user .
 skim --version
@@ -116,7 +116,7 @@ python3 -m skim --version
 This is the safest setup for teams that do not want a global install.
 
 ```bash
-git clone https://github.com/githubzuoyi/skim.git
+git clone https://github.com/ericzuo-ai/skim.git
 cd skim
 python3 -m venv .venv
 . .venv/bin/activate
@@ -131,7 +131,7 @@ This layout is useful when you want skim to live alongside the target repo:
 
 ```bash
 cd /path/to/your/code-repo
-git clone https://github.com/githubzuoyi/skim.git skim
+git clone https://github.com/ericzuo-ai/skim.git skim
 cd skim
 python3 -m venv .venv
 . .venv/bin/activate
