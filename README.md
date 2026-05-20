@@ -102,7 +102,13 @@ $ skim read src/auth/service.py:AuthService.login
 curl -fsSL https://raw.githubusercontent.com/ericzuo-ai/skim/main/install.sh | bash
 ```
 
-This installs skim into a managed user venv under `~/.local/share/skim`, creates a stable CLI wrapper at `~/.local/bin/skim`, and leaves hook installation as a separate explicit step.
+Then, for Copilot, run:
+
+```bash
+skim init --agent copilot
+```
+
+The installer sets up a managed user install automatically and tries to expose `skim` on your existing `PATH` without asking you to edit shell config by hand. If your current terminal still does not see `skim`, open a new terminal and run the init step there.
 
 ### Option 1: user-level install
 
