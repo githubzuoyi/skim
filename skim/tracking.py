@@ -317,7 +317,7 @@ class Tracker:
     def print_summary(self, summary: dict[str, Any]) -> None:
         """Print a beautifully formatted gain summary."""
         from skim.style import (
-            BOLD, DIM, RESET, CYAN, GREEN, BRIGHT_GREEN, YELLOW, WHITE,
+            BOLD, DIM, RESET, GREEN, BRIGHT_GREEN, YELLOW, WHITE,
             BRIGHT_CYAN, hline, fmt_savings, SAVED,
         )
 
@@ -368,25 +368,6 @@ class Tracker:
             f"  {DIM}  Skim compression on tracked input{RESET}"
             f" {GREEN}{total_compression_pct:.1f}%{RESET}"
             f" {DIM}({summary['total_tokens_saved']:,} / {summary['total_input_tokens']:,}){RESET}"
-        )
-        latest_copilot_session = summary.get("latest_copilot_session")
-        if (
-            latest_copilot_session
-            and latest_copilot_session.get("skim_input_tokens", 0) > 0
-            and latest_copilot_session.get("non_cached_input_tokens", 0) > 0
-        ):
-            share_pct = latest_copilot_session["skim_share_of_non_cached_input_pct"]
-            saved_tokens = latest_copilot_session["skim_saved_tokens"]
-            non_cached_tokens = latest_copilot_session["non_cached_input_tokens"]
-            print(
-                f"  {DIM}  Latest session skim-saved share of non-cached input{RESET}"
-                f" {CYAN}{share_pct:.1f}%{RESET}"
-                f" {DIM}({saved_tokens:,} / {non_cached_tokens:,}){RESET}"
-            )
-        print(
-            f"  {DIM}  Pricing basis{RESET}"
-            f"{'':>22}{DIM}{summary['pricing_display_name']} input @ "
-            f"${summary['input_price_per_million']:.2f}/1M{RESET}"
         )
 
         if summary["est_input_cost_saved_monthly"] > 0:

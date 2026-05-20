@@ -3,6 +3,93 @@
 from __future__ import annotations
 
 
+GLOBAL_LAUNCHER_FILENAME = "skim-global-launcher.sh"
+GLOBAL_LAUNCHER_HOME_COMMAND = '"${HOME}/.config/skim/launchers/skim-global-launcher.sh"'
+
+GLOBAL_LAUNCHER_SH = """#!/bin/sh
+set -eu
+
+agent="${1:-claude}"
+
+has_skim_main() {
+    python_cmd="$1"
+    "$python_cmd" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("skim.__main__") else 1)' >/dev/null 2>&1
+}
+
+run_skim_bin() {
+    skim_bin="$1"
+    if [ -x "$skim_bin" ]; then
+        exec "$skim_bin" hook "$agent"
+    fi
+}
+
+run_skim_python() {
+    python_cmd="$1"
+    if command -v "$python_cmd" >/dev/null 2>&1 && has_skim_main "$python_cmd"; then
+        exec "$python_cmd" -m skim hook "$agent"
+    fi
+}
+
+if [ -n "${SKIM_BIN:-}" ] && [ -x "${SKIM_BIN}" ]; then
+    exec "${SKIM_BIN}" hook "${agent}"
+fi
+
+if [ -n "${SKIM_PYTHON:-}" ]; then
+    run_skim_python "${SKIM_PYTHON}"
+fi
+
+if [ -n "${VIRTUAL_ENV:-}" ]; then
+    run_skim_bin "${VIRTUAL_ENV}/bin/skim"
+    run_skim_python "${VIRTUAL_ENV}/bin/python"
+fi
+
+for candidate in \
+    "$PWD/.venv/bin/skim" \
+    "$PWD/venv/bin/skim" \
+    "$PWD/env/bin/skim" \
+    "$PWD/skim/.venv/bin/skim" \
+    "$PWD/skim/venv/bin/skim" \
+    "$PWD/skim/env/bin/skim"
+do
+    run_skim_bin "$candidate"
+done
+
+for python_cmd in \
+    "$PWD/.venv/bin/python" \
+    "$PWD/venv/bin/python" \
+    "$PWD/env/bin/python" \
+    "$PWD/skim/.venv/bin/python" \
+    "$PWD/skim/venv/bin/python" \
+    "$PWD/skim/env/bin/python"
+do
+    if [ -x "$python_cmd" ]; then
+        run_skim_python "$python_cmd"
+    fi
+done
+
+if command -v skim >/dev/null 2>&1; then
+    exec skim hook "${agent}"
+fi
+
+for candidate in \
+    "${HOME}/.local/bin/skim" \
+    "${HOME}/miniforge3/bin/skim" \
+    "${HOME}/miniconda3/bin/skim" \
+    "${HOME}/anaconda3/bin/skim" \
+    "${HOME}/.pyenv/shims/skim"
+do
+    run_skim_bin "$candidate"
+done
+
+for python_cmd in python3 python; do
+    run_skim_python "$python_cmd"
+done
+
+echo "skim hook launcher: unable to find a runnable skim for ${agent}. Set SKIM_BIN / SKIM_PYTHON or install skim into PATH, VIRTUAL_ENV, or the repo-local venv." >&2
+exit 127
+"""
+
+
 COPILOT_LAUNCHER_FILENAME = "skim-launcher.sh"
 COPILOT_LAUNCHER_COMMAND = f"/bin/sh ./.github/hooks/{COPILOT_LAUNCHER_FILENAME} copilot"
 
@@ -36,8 +123,8 @@ if [ -n "${SKIM_BIN:-}" ] && [ -x "${SKIM_BIN}" ]; then
     exec "${SKIM_BIN}" hook "${agent}"
 fi
 
-if command -v skim >/dev/null 2>&1; then
-    exec skim hook "${agent}"
+if [ -n "${SKIM_PYTHON:-}" ]; then
+    run_skim_python "${SKIM_PYTHON}"
 fi
 
 if [ -n "${VIRTUAL_ENV:-}" ]; then
@@ -69,9 +156,9 @@ do
     fi
 done
 
-if [ -n "${SKIM_PYTHON:-}" ]; then
-    run_skim_python "${SKIM_PYTHON}"
-done
+if command -v skim >/dev/null 2>&1; then
+    exec skim hook "${agent}"
+fi
 
 for candidate in \
     "${HOME}/.local/bin/skim" \
@@ -97,7 +184,18 @@ CLAUDE_HOOK = {
     "hooks": [
         {
             "type": "command",
-            "command": "skim hook claude",
+            "command": f"/bin/sh {GLOBAL_LAUNCHER_HOME_COMMAND} claude",
+        }
+    ],
+}
+
+# Codex hook JSON structure (PreToolUse)
+CODEX_HOOK = {
+    "matcher": "Bash",
+    "hooks": [
+        {
+            "type": "command",
+            "command": f"/bin/sh {GLOBAL_LAUNCHER_HOME_COMMAND} codex",
         }
     ],
 }
@@ -107,7 +205,7 @@ CURSOR_HOOK_CONFIG = {
     "hooks": {
         "preToolUse": [
             {
-                "command": "skim hook cursor",
+                "command": f"/bin/sh {GLOBAL_LAUNCHER_HOME_COMMAND} cursor",
                 "matcher": "Shell",
             }
         ]
@@ -150,15 +248,11 @@ When you read a large code file, you'll get something like:
 // src/auth/service.py  487 lines  4 exports  12 symbols
 // imports: hashlib, secrets, datetime, ...
 
-class AuthService
-    def __init__(self, repo: UserRepository, secret: str)
-    async def login(self, email: str, password: str) -> AuthResult
-    async def logout(self, session_id: str) -> None
-    def verify_token(self, token: str) -> dict
-
-// [487 lines → 15 lines · 97% reduction]
-// [skim tokens ~3,084 -> ~182, saved ~2,902 (94%)]
-// [skim read src/auth/service.py:<symbol> for full function]
+class AuthService  [L19-L143]
+    def __init__(self, repo: UserRepository, secret: str)  [L20-L22]
+    async def login(self, email: str, password: str) -> AuthResult  [L24-L32]
+    async def logout(self, session_id: str) -> None  [L34-L41]
+    def verify_token(self, token: str) -> dict  [L43-L57]
 ```
 
 ## Drill into specific functions
@@ -211,7 +305,7 @@ instead of raw content. Use the following commands:
 
 ### Tips
 - Use structural summaries first, then request specific symbols
-- Structural summaries now show approximate original/current/saved token counts inline
+- Structural summaries show original line spans so you can drill into exact symbols fast
 - Run `skim gain` to see cumulative token savings statistics
 """
 

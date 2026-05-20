@@ -32,9 +32,36 @@ class TestStructuralRead:
         assert "class UserService  [L13-L53]" in result.content
         assert "def get_user(self, user_id: int) -> Optional[dict]  [L20-L28]" in result.content
         assert "def hash_password(password: str, salt: Optional[str] = None) -> str  [L76-L82]" in result.content
-        assert "skim tokens ~" in result.content
-        assert "saved ~" in result.content
-        assert "drill-down: use the original file path above" in result.content
+        assert "skim tokens ~" not in result.content
+        assert "saved ~" not in result.content
+        assert "drill-down: use the original file path above" not in result.content
+        assert "lines ->" not in result.content
+
+    def test_python_module_constants_fallback(self, tmp_path):
+        source = tmp_path / "constants.py"
+        source.write_text(
+            '"""Module constants."""\n'
+            "from __future__ import annotations\n"
+            "\n"
+            "PRIMARY_MODEL = \"gpt-5.4\"\n"
+            "API_OPTIONS = {\n"
+            "    \"timeout\": 30,\n"
+            "    \"retries\": 2,\n"
+            "}\n"
+            "PROMPT_TEMPLATE = \"\"\"system\n"
+            "user\n"
+            "assistant\n"
+            "\"\"\"\n"
+        )
+
+        result = structural_read(source, small_file_threshold=1)
+
+        assert result.mode == "structural"
+        assert "0 symbols" not in result.content
+        assert "PRIMARY_MODEL = \"gpt-5.4\"  [L4]" in result.content
+        assert "API_OPTIONS = {  [L5-L8]" in result.content
+        assert "PROMPT_TEMPLATE = \"\"\"system  [L9-L12]" in result.content
+        assert '"""Module constants."""' not in result.content
 
     def test_decorated_class_and_method_are_extracted(self, tmp_path):
         source = tmp_path / "decorated.py"

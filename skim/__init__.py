@@ -1,3 +1,3 @@
 """skim - AST-aware token optimizer for AI coding agents."""
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

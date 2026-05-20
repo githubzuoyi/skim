@@ -11,10 +11,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from skim.pricing import estimate_input_cost, format_usd, resolve_pricing_model, savings_pct
-from skim.session import estimate_tokens
-
-
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -38,6 +34,8 @@ class LanguageConfig:
     decorator_types: frozenset[str] = frozenset()
     # Additional types to capture as top-level symbols (constants, types, etc.)
     extra_symbol_types: frozenset[str] = frozenset()
+    # Node types to capture only when no functions/classes were found.
+    fallback_symbol_types: frozenset[str] = frozenset()
 
 
 LANGUAGES: dict[str, LanguageConfig] = {
@@ -47,6 +45,7 @@ LANGUAGES: dict[str, LanguageConfig] = {
         class_types=frozenset({"class_definition"}),
         import_types=frozenset({"import_statement", "import_from_statement"}),
         decorator_types=frozenset({"decorator"}),
+        fallback_symbol_types=frozenset({"expression_statement"}),
     ),
     ".js": LanguageConfig(
         ts_module="tree_sitter_javascript",
@@ -414,6 +413,17 @@ def _extract_symbols(
                 sym.is_exported = exported
                 symbols.append(sym)
 
+    if symbols or not config.fallback_symbol_types:
+        return symbols
+
+    for node in root.children:
+        if node.type not in config.fallback_symbol_types:
+            continue
+
+        sym = _extract_extra_symbol(node, config, source, lines)
+        if sym:
+            symbols.append(sym)
+
     return symbols
 
 
@@ -478,9 +488,20 @@ def _extract_extra_symbol(
     text = _node_text(node, source)
     first_line = text.split("\n")[0].rstrip()
 
+    assignment_node = None
+    if node.type == "expression_statement":
+        assignment_node = next((child for child in node.children if child.type == "assignment"), None)
+        if assignment_node is None:
+            return None
+
     name_node = node.child_by_field_name(config.name_field)
     if name_node:
         name = _node_text(name_node, source)
+    elif assignment_node is not None:
+        left_node = assignment_node.child_by_field_name("left")
+        if left_node is None:
+            return None
+        name = _node_text(left_node, source)
     else:
         # Heuristic: pull name from first assignment or declaration
         for child in node.children:
@@ -499,6 +520,8 @@ def _extract_extra_symbol(
 
     if node.type == "type_alias_declaration":
         kind = "type"
+    elif assignment_node is not None:
+        kind = "constant"
     elif "const" in first_line or "let" in first_line or "var" in first_line:
         kind = "constant"
     else:
@@ -708,42 +731,6 @@ def _format_structural_summary(
             else:
                 parts.append(f"{prefix}{sym.signature}  {line_span}")
 
-    # Footer
-    summary_lines = len(parts) + 2
-    pct = _savings_pct(len(lines), summary_lines)
-    reduction_line = f"// [{len(lines)} lines -> {summary_lines} lines ({pct} reduction)]"
-    drilldown_line = (
-        "// [drill-down: use the original file path above with the Lx-Ly "
-        "tags for exact read_file ranges]"
-    )
-    symbol_line = f"// [skim read {path}:<symbol> for full function]"
-
-    original_text = "\n".join(lines)
-    savings_line = _inline_savings_line(
-        original_text,
-        "\n".join(parts + ["", reduction_line, drilldown_line, symbol_line]),
-    )
-
-    parts.append("")
-    if tty:
-        parts.append(
-            f"{DIM}// [{len(lines)} lines → {summary_lines} lines "
-            f"({GREEN}{pct} reduction{DIM})]{RESET}"
-        )
-        if savings_line:
-            parts.append(f"{DIM}{savings_line}{RESET}")
-        parts.append(
-            f"{DIM}// [drill-down: use the original file path above with the "
-            f"Lx-Ly tags for exact read_file ranges]{RESET}"
-        )
-        parts.append(f"{DIM}// [skim read {path}:<symbol> for full function]{RESET}")
-    else:
-        parts.append(reduction_line)
-        if savings_line:
-            parts.append(savings_line)
-        parts.append(drilldown_line)
-        parts.append(symbol_line)
-
     return "\n".join(parts)
 
 
@@ -788,32 +775,6 @@ def _compact_imports(imports: list[str]) -> str:
     return ", ".join(unique)
 
 
-def _savings_pct(original: int, summary: int) -> str:
-    if original <= 0:
-        return "0%"
-    pct = round((1 - summary / original) * 100)
-    return f"{pct}%"
-
-
-def _inline_savings_line(original_text: str, skim_text: str) -> str:
-    """Describe prompt-side savings in a form the agent can surface to users."""
-
-    input_tokens = estimate_tokens(original_text)
-    output_tokens = estimate_tokens(skim_text)
-    saved = input_tokens - output_tokens
-    if saved <= 0:
-        return ""
-
-    pricing = resolve_pricing_model()
-    pct = savings_pct(input_tokens, output_tokens)
-    cost = estimate_input_cost(saved, pricing.key)
-    return (
-        f"// [skim tokens ~{input_tokens:,} -> ~{output_tokens:,}, "
-        f"saved ~{saved:,} ({pct}%), est. {pricing.display_name} input cost "
-        f"{format_usd(cost)}]"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Fallback: head + tail for unsupported languages
 # ---------------------------------------------------------------------------
@@ -840,9 +801,6 @@ def _head_tail_fallback(
         "",
         *lines[-tail:],
     ]
-    savings_line = _inline_savings_line(content, "\n".join(parts))
-    if savings_line:
-        parts.extend(["", savings_line])
     summary = "\n".join(parts)
     return SkimResult(
         content=summary,

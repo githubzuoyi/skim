@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skimcode"
-version = "0.2.0"
+version = "0.2.1"
 description = "AST-aware token optimizer for AI coding agents. 80-97% fewer tokens on file reads."
 requires-python = ">=3.10"
 license = {text = "MIT"}

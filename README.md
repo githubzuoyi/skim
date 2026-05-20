@@ -8,7 +8,7 @@
 
 skim is a token-optimization layer for AI coding agents. It rewrites expensive file reads into structural summaries, compresses noisy command output, and records how much prompt budget was actually saved.
 
-It currently supports **Claude Code**, **Cursor**, **GitHub Copilot**, **Codex**, **Gemini CLI**, **Windsurf**, and **Cline**.
+The current first-class hook targets are **GitHub Copilot**, **Claude Code**, and **Cursor**. **Codex** is still experimental; **Gemini CLI**, **Windsurf**, and **Cline** use shell alias integrations.
 
 ---
 
@@ -76,10 +76,6 @@ class AuthService  [L19-L143]
     async def login(self, email: str, password: str) -> AuthResult  [L24-L32]
     async def logout(self, session_id: str) -> None  [L34-L41]
     def verify_token(self, token: str) -> dict  [L43-L57]
-
-// [487 lines -> 15 lines (97% reduction)]
-// [skim tokens ~4,000 -> ~120, saved ~3,880 (97%)]
-// [skim read src/auth/service.py:<symbol> for full function]
 ```
 
 skim keeps the architectural signal, line spans, and drill-down path, while dropping bodies that the model does not need yet.
@@ -144,11 +140,13 @@ python -m pip install .
 python -m skim --version
 ```
 
-The Copilot launcher now auto-detects all of these layouts:
+The generated skim launchers now auto-detect all of these layouts:
 
 - the active `VIRTUAL_ENV`
 - the target repo's `.venv` / `venv` / `env`
 - a repo-local dedicated skim checkout at `./skim/.venv`
+
+Copilot uses a project-scoped launcher under `.github/hooks`. Claude Code and Cursor use a global launcher under `~/.config/skim/launchers`, but the environment probing is the same.
 
 ---
 
@@ -184,19 +182,23 @@ Copilot hook installation currently targets **macOS, Linux, and WSL**. The gener
 
 ---
 
-## Other Supported Agents
+## Agent Support
 
-| Agent | Integration type | Install command |
-|-------|------------------|-----------------|
-| Claude Code | global hook in `~/.claude/settings.json` | `skim init -g --agent claude` |
-| Cursor | global hook in `~/.cursor/hooks.json` | `skim init -g --agent cursor` |
-| GitHub Copilot | project hook in `.github/hooks` | `skim init --agent copilot` |
-| Codex | global hook in `~/.codex/settings.json` | `skim init -g --agent codex` |
-| Gemini CLI | shell alias install | `skim init -g --agent gemini` |
-| Windsurf | shell alias install | `skim init -g --agent windsurf` |
-| Cline | shell alias install | `skim init -g --agent cline` |
+| Agent | Status | Integration type | Install command |
+|-------|--------|------------------|-----------------|
+| GitHub Copilot | validated | project hook in `.github/hooks` | `skim init --agent copilot` |
+| Claude Code | validated | global hook in `~/.claude/settings.json` | `skim init -g --agent claude` |
+| Cursor | validated | global hook in `~/.cursor/hooks.json` | `skim init -g --agent cursor` |
+| Codex | experimental | global hook in `~/.codex/settings.json` | `skim init -g --agent codex` |
+| Gemini CLI | available via shell alias | shell alias install | `skim init -g --agent gemini` |
+| Windsurf | available via shell alias | shell alias install | `skim init -g --agent windsurf` |
+| Cline | available via shell alias | shell alias install | `skim init -g --agent cline` |
 
 Use `skim init --show --agent <agent>` to inspect the installed hook state.
+
+For Claude Code and Cursor, `skim init -g` installs a small launcher that can still find skim when the editor process does not inherit your shell `PATH`, as long as skim is available through `VIRTUAL_ENV`, the repo's `.venv` / `venv` / `env`, or a repo-local `./skim/.venv` layout.
+
+For this release, the recommended rollout target is Copilot first, then Claude Code and Cursor. Codex should stay out of the release promise until it has matching runtime validation.
 
 ---
 
@@ -251,8 +253,7 @@ skim session clear
 
 - per-mode input / output / saved tokens
 - total compression on tracked input
-- latest Copilot session share of non-cached input
-- GPT-5.4-based input cost estimates
+- estimated input cost saved
 
 ### Dashboard
 

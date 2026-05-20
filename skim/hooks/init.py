@@ -7,6 +7,7 @@ to intercept commands via PreToolUse hooks.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -18,7 +19,10 @@ from skim.hooks.constants import (
     COPILOT_LAUNCHER_SH,
     COPILOT_HOOK_JSON,
     COPILOT_INSTRUCTIONS,
+    CODEX_HOOK,
     CURSOR_HOOK_CONFIG,
+    GLOBAL_LAUNCHER_FILENAME,
+    GLOBAL_LAUNCHER_SH,
     SKILL_CONTENT,
     _CURSOR_RULE_CONTENT,
 )
@@ -100,6 +104,7 @@ def init_claude_global() -> None:
     """Install skim hook for Claude Code globally."""
     settings_path = Path.home() / ".claude" / "settings.json"
     settings_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_path = _ensure_global_launcher()
 
     if settings_path.exists():
         try:
@@ -124,6 +129,7 @@ def init_claude_global() -> None:
     from skim.style import CHECK, BOLD, DIM, RESET, CYAN, GREEN
 
     print(f"  {CHECK} Installed Claude Code hook {DIM}→{RESET} {settings_path}")
+    print(f"  {CHECK} Created Claude launcher {DIM}→{RESET} {launcher_path}")
 
     _write_skill_file()
     _patch_claude_md()
@@ -153,6 +159,7 @@ def _uninstall_claude() -> None:
     if len(pre_tool) < original_len:
         settings_path.write_text(json.dumps(settings, indent=2) + "\n")
         print(f"  ✓ Removed Claude Code hook from {settings_path}")
+        _remove_global_launcher_if_unused()
     else:
         print("  No skim hook found in Claude Code settings.")
 
@@ -165,6 +172,7 @@ def init_cursor() -> None:
     """Install skim hook for Cursor."""
     hooks_path = Path.home() / ".cursor" / "hooks.json"
     hooks_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_path = _ensure_global_launcher()
 
     if hooks_path.exists():
         try:
@@ -189,6 +197,7 @@ def init_cursor() -> None:
     from skim.style import CHECK, BOLD, DIM, RESET, GREEN
 
     print(f"  {CHECK} Installed Cursor hook {DIM}→{RESET} {hooks_path}")
+    print(f"  {CHECK} Created Cursor launcher {DIM}→{RESET} {launcher_path}")
 
     _write_skill_file()
     _write_cursor_rule()
@@ -218,6 +227,7 @@ def _uninstall_cursor() -> None:
     if len(pre_tool) < original_len:
         hooks_path.write_text(json.dumps(existing, indent=2) + "\n")
         print(f"  ✓ Removed Cursor hook from {hooks_path}")
+        _remove_global_launcher_if_unused()
     else:
         print("  No skim hook found in Cursor hooks.json.")
 
@@ -268,6 +278,7 @@ def _show_status(agent: str) -> None:
 
     if agent == "claude":
         settings_path = Path.home() / ".claude" / "settings.json"
+        launcher_path = _global_launcher_path()
         if settings_path.exists():
             settings = json.loads(settings_path.read_text())
             hooks = settings.get("hooks", {}).get("PreToolUse", [])
@@ -275,6 +286,8 @@ def _show_status(agent: str) -> None:
             if skim_hooks:
                 print(f"  ✓ Installed in {settings_path}")
                 print(f"    Hook: {json.dumps(skim_hooks[0], indent=6)}")
+                if launcher_path.exists():
+                    print(f"    Launcher: {launcher_path}")
             else:
                 print(f"  ✗ Not installed (checked {settings_path})")
         else:
@@ -282,6 +295,7 @@ def _show_status(agent: str) -> None:
 
     elif agent == "cursor":
         hooks_path = Path.home() / ".cursor" / "hooks.json"
+        launcher_path = _global_launcher_path()
         if hooks_path.exists():
             existing = json.loads(hooks_path.read_text())
             hooks = existing.get("hooks", {}).get("preToolUse", [])
@@ -289,10 +303,29 @@ def _show_status(agent: str) -> None:
             if skim_hooks:
                 print(f"  ✓ Installed in {hooks_path}")
                 print(f"    Hook: {json.dumps(skim_hooks[0], indent=6)}")
+                if launcher_path.exists():
+                    print(f"    Launcher: {launcher_path}")
             else:
                 print(f"  ✗ Not installed (checked {hooks_path})")
         else:
             print(f"  ✗ No hooks.json found at {hooks_path}")
+
+    elif agent == "codex":
+        settings_path = Path.home() / ".codex" / "settings.json"
+        launcher_path = _global_launcher_path()
+        if settings_path.exists():
+            settings = json.loads(settings_path.read_text())
+            hooks = settings.get("hooks", {}).get("PreToolUse", [])
+            skim_hooks = [h for h in hooks if "skim" in str(h)]
+            if skim_hooks:
+                print(f"  ✓ Installed in {settings_path}")
+                print(f"    Hook: {json.dumps(skim_hooks[0], indent=6)}")
+                if launcher_path.exists():
+                    print(f"    Launcher: {launcher_path}")
+            else:
+                print(f"  ✗ Not installed (checked {settings_path})")
+        else:
+            print(f"  ✗ No settings.json found at {settings_path}")
 
     elif agent == "copilot":
         hook_path = Path.cwd() / ".github" / "hooks" / "skim-rewrite.json"
@@ -327,10 +360,73 @@ def _uninstall(agent: str) -> None:
         _uninstall_claude()
     elif agent == "cursor":
         _uninstall_cursor()
-    elif agent in ("codex", "copilot", "gemini", "windsurf", "cline"):
+    elif agent == "codex":
+        _uninstall_codex()
+    elif agent in ("copilot", "gemini", "windsurf", "cline"):
         _uninstall_shell_alias(agent)
     else:
         print(f"skim: uninstall not supported for '{agent}'")
+
+
+def _global_launcher_dir() -> Path:
+    xdg = os.environ.get("XDG_CONFIG_HOME", "")
+    if xdg:
+        base = Path(xdg)
+    else:
+        base = Path.home() / ".config"
+    return base / "skim" / "launchers"
+
+
+def _global_launcher_path() -> Path:
+    return _global_launcher_dir() / GLOBAL_LAUNCHER_FILENAME
+
+
+def _ensure_global_launcher() -> Path:
+    launcher_dir = _global_launcher_dir()
+    launcher_dir.mkdir(parents=True, exist_ok=True)
+    launcher_path = _global_launcher_path()
+    launcher_path.write_text(GLOBAL_LAUNCHER_SH)
+    launcher_path.chmod(0o755)
+    return launcher_path
+
+
+def _remove_global_launcher_if_unused() -> None:
+    launcher_path = _global_launcher_path()
+    if not launcher_path.exists():
+        return
+
+    claude_settings = Path.home() / ".claude" / "settings.json"
+    cursor_hooks = Path.home() / ".cursor" / "hooks.json"
+    codex_settings = Path.home() / ".codex" / "settings.json"
+
+    launcher_ref = GLOBAL_LAUNCHER_FILENAME
+    if claude_settings.exists():
+        try:
+            settings = json.loads(claude_settings.read_text())
+            hooks = settings.get("hooks", {}).get("PreToolUse", [])
+            if any(launcher_ref in str(h) for h in hooks):
+                return
+        except json.JSONDecodeError:
+            return
+
+    if cursor_hooks.exists():
+        try:
+            hooks = json.loads(cursor_hooks.read_text()).get("hooks", {}).get("preToolUse", [])
+            if any(launcher_ref in str(h) for h in hooks):
+                return
+        except json.JSONDecodeError:
+            return
+
+    if codex_settings.exists():
+        try:
+            settings = json.loads(codex_settings.read_text())
+            hooks = settings.get("hooks", {}).get("PreToolUse", [])
+            if any(launcher_ref in str(h) for h in hooks):
+                return
+        except json.JSONDecodeError:
+            return
+
+    launcher_path.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +441,7 @@ def init_codex() -> None:
     """
     settings_path = Path.home() / ".codex" / "settings.json"
     settings_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_path = _ensure_global_launcher()
 
     if settings_path.exists():
         try:
@@ -357,25 +454,46 @@ def init_codex() -> None:
     hooks = settings.setdefault("hooks", {})
     pre_tool: list = hooks.setdefault("PreToolUse", [])
 
-    codex_hook = {
-        "matcher": "Bash",
-        "hooks": [{"type": "command", "command": "skim hook claude"}],
-    }
-
     pre_tool[:] = [
         h for h in pre_tool
         if "skim" not in str(h.get("hooks", [{}])[0].get("command", ""))
     ]
-    pre_tool.append(codex_hook)
+    pre_tool.append(CODEX_HOOK)
 
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
     print(f"  ✓ Installed Codex hook → {settings_path}")
+    print(f"  ✓ Created Codex launcher → {launcher_path}")
 
     _write_skill_file()
 
     print()
     print("  Done! Restart Codex to activate.")
     print("  Run `skim gain` anytime to see token savings.")
+
+
+def _uninstall_codex() -> None:
+    """Remove skim hook from Codex."""
+    settings_path = Path.home() / ".codex" / "settings.json"
+    if not settings_path.exists():
+        print("  No Codex settings found.")
+        return
+
+    settings = json.loads(settings_path.read_text())
+    hooks = settings.get("hooks", {})
+    pre_tool = hooks.get("PreToolUse", [])
+
+    original_len = len(pre_tool)
+    pre_tool[:] = [
+        h for h in pre_tool
+        if "skim" not in str(h.get("hooks", [{}])[0].get("command", ""))
+    ]
+
+    if len(pre_tool) < original_len:
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+        print(f"  ✓ Removed Codex hook from {settings_path}")
+        _remove_global_launcher_if_unused()
+    else:
+        print("  No skim hook found in Codex settings.")
 
 
 # ---------------------------------------------------------------------------

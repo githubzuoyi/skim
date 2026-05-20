@@ -4,8 +4,20 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from skim.hooks import hook_cmd
+
+
+class TestHookDispatch:
+    def test_cmd_hook_dispatches_codex(self, monkeypatch):
+        calls: list[str] = []
+
+        monkeypatch.setattr(hook_cmd, "run_codex_hook", lambda: calls.append("codex"))
+
+        hook_cmd.cmd_hook(SimpleNamespace(agent="codex"))
+
+        assert calls == ["codex"]
 
 
 class TestCopilotShellHook:

@@ -2,6 +2,7 @@
 
 These are called by agent hooks (not by users directly):
 - ``skim hook claude`` — reads JSON from stdin, rewrites command, outputs JSON
+- ``skim hook codex`` — compatible with Codex PreToolUse JSON
 - ``skim hook cursor`` — similar protocol for Cursor
 - ``skim hook copilot`` — similar protocol for GitHub Copilot
 """
@@ -14,17 +15,28 @@ from pathlib import Path
 
 
 _HOOK_TMP_DIR = Path("/tmp/skim-hook")
-_HOOK_SUMMARY_VERSION = 5
+_HOOK_SUMMARY_VERSION = 6
 
 
 def cmd_hook(args) -> None:
     """Dispatch to the appropriate hook handler."""
     if args.agent == "claude":
         run_claude_hook()
+    elif args.agent == "codex":
+        run_codex_hook()
     elif args.agent == "cursor":
         run_cursor_hook()
     elif args.agent == "copilot":
         run_copilot_hook()
+
+
+def run_codex_hook() -> None:
+    """Called by Codex PreToolUse hook.
+
+    Codex currently uses the same Bash-oriented hook payload as Claude Code,
+    so it can reuse the same rewrite handler.
+    """
+    run_claude_hook()
 
 
 def run_claude_hook() -> None:
