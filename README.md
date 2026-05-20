@@ -96,6 +96,14 @@ $ skim read src/auth/service.py:AuthService.login
 
 ## Installation
 
+### One-line install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ericzuo-ai/skim/main/install.sh | bash
+```
+
+This installs skim into a managed user venv under `~/.local/share/skim`, creates a stable CLI wrapper at `~/.local/bin/skim`, and leaves hook installation as a separate explicit step.
+
 ### Option 1: user-level install
 
 ```bash
